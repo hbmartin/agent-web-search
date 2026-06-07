@@ -77,7 +77,7 @@ export const main = async (
   }
 
   const count = parseCount(parsed.values.count);
-  if (parsed.values.count && count === undefined) {
+  if (parsed.values.count !== undefined && count === undefined) {
     streams.stderr.write("Invalid --count. Pass a positive integer.\n");
     return 1;
   }
@@ -168,11 +168,11 @@ const splitValues = (values: string | string[]): string[] =>
     .filter(Boolean);
 
 const parseCount = (value: string | undefined): number | undefined => {
-  if (!value) {
+  if (value === undefined) {
     return undefined;
   }
 
-  const count = Number(value);
+  const count = Number(value.trim());
   return Number.isInteger(count) && count > 0 ? count : undefined;
 };
 

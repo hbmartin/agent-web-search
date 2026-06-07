@@ -278,9 +278,11 @@ describe("built-in adapters", () => {
     expect(body.scrapeOptions.formats).toEqual([{ type: "markdown" }]);
     expect(
       response.firecrawl?.ok
-        ? response.firecrawl.metadata.warnings[0]?.message
-        : "",
-    ).toContain("maps text requests to markdown");
+        ? response.firecrawl.metadata.warnings.some((warning) =>
+            warning.message.includes("maps text requests to markdown"),
+          )
+        : false,
+    ).toBe(true);
   });
 
   it("maps Sonar answer, citations, and search results", async () => {
