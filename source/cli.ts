@@ -116,6 +116,8 @@ export const main = async (
       ? { includeContent: parseContent(parsed.values.content) }
       : {}),
   };
+  // The CLI validates first so command failures are formatted for humans;
+  // client.search/searchStream still validate at the public API boundary.
   const parsedQuery = QueryInputSchema.safeParse(queryInput);
   if (!parsedQuery.success) {
     streams.stderr.write(

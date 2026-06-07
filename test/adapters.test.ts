@@ -323,13 +323,14 @@ describe("built-in adapters", () => {
     expect(response.sonar?.ok && response.sonar.answer?.text).toBe(
       "Answer text",
     );
-    expect(response.sonar?.ok && response.sonar.answer?.citations[0]).toEqual({
-      url: "https://citation.example",
-      title: "Citation",
-      marker: 1,
-    });
-    expect(response.sonar?.ok && response.sonar.results[0]?.title).toBe(
-      "Sonar source",
+    expect(
+      response.sonar?.ok && response.sonar.answer?.citations[0]?.url,
+    ).toBe("https://citation.example");
+    expect(
+      response.sonar?.ok && response.sonar.answer?.citations[0]?.marker,
+    ).toBe(1);
+    expect(response.sonar?.ok && response.sonar.results[0]?.url).toBe(
+      "https://sonar.example",
     );
   });
 

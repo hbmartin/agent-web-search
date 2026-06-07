@@ -224,6 +224,8 @@ export const truncateContent = (
 
 type QueryParamValue = boolean | number | string | string[] | undefined;
 
+// URL query strings only support flat scalar values; POST bodies may carry
+// nested provider-specific objects directly.
 export const queryParams = (
   engine: string,
   params: Record<string, unknown>,
