@@ -5,6 +5,7 @@ import {
   defineEngine,
   type EngineAdapter,
   EngineConfigSchema,
+  QueryInputSchema,
   search,
 } from "../source/index.js";
 
@@ -209,6 +210,7 @@ describe("createSearchClient", () => {
     await client.search({ query: "network" }, { signal: abort.signal });
 
     expect(fetch).toHaveBeenCalledTimes(3);
+    expect(addEventListener).toHaveBeenCalled();
     expect(removeEventListener).toHaveBeenCalledTimes(
       addEventListener.mock.calls.length,
     );
@@ -264,6 +266,21 @@ describe("createSearchClient", () => {
       }),
     ).rejects.toThrow("Invalid date");
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves caller calendar dates from ISO timestamp date ranges", () => {
+    const parsed = QueryInputSchema.parse({
+      query: "dates",
+      dateRange: {
+        start: "2026-06-07T00:30:00+14:00",
+        end: "2026-06-07T23:30:00-12:00",
+      },
+    });
+
+    expect(parsed.dateRange).toEqual({
+      start: "2026-06-07",
+      end: "2026-06-07",
+    });
   });
 
   it("explains how to register unknown engine ids", () => {

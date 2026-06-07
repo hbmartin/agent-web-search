@@ -362,6 +362,29 @@ describe("CLI", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("returns a non-zero code for an empty count", async () => {
+    const fetch = vi.fn();
+    let stderr = "";
+    const code = await main(
+      ["--query", "cli", "--engine", "brave", "--count="],
+      { BRAVE_API_KEY: "key" },
+      fetch as typeof globalThis.fetch,
+      {
+        stdout: { write: () => true },
+        stderr: {
+          write: (chunk: string) => {
+            stderr += chunk;
+            return true;
+          },
+        },
+      },
+    );
+
+    expect(code).toBe(1);
+    expect(stderr).toContain("Invalid --count");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("returns a non-zero code for invalid query input", async () => {
     const fetch = vi.fn();
     let stderr = "";

@@ -20,9 +20,7 @@ const normalizeDateInput = (value: string): string | null => {
   }
 
   const parsed = new Date(trimmed);
-  return Number.isNaN(parsed.getTime())
-    ? null
-    : parsed.toISOString().slice(0, 10);
+  return Number.isNaN(parsed.getTime()) ? null : dateOnly;
 };
 
 const isValidDateOnly = (value: string): boolean => {
