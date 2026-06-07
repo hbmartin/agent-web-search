@@ -9,6 +9,7 @@ import {
   makeResult,
   makeSuccess,
   mergeParams,
+  singleQuery,
   truncateContent,
 } from "../core/utils.js";
 import type {
@@ -57,7 +58,7 @@ export const firecrawlAdapter: EngineAdapter = {
     }
 
     const mapped = {
-      query: singleInput(input.query),
+      query: singleQuery(input.query),
       limit: input.count,
       country: input.country,
       sources: [{ type: "web", ...(tbs ? { tbs } : {}) }],
@@ -108,15 +109,12 @@ export const firecrawlAdapter: EngineAdapter = {
   },
 };
 
-const singleInput = (query: string | string[]): string =>
-  Array.isArray(query) ? (query[0] ?? "") : query;
-
 const scrapeOptions = (
   options: ContentOptions,
   warnings: { code: string; message: string; param?: string }[],
 ) => {
   const formats: { type: string }[] = [];
-  if (options.markdown ?? true) {
+  if ((options.markdown ?? true) || options.text) {
     formats.push({ type: "markdown" });
   }
   if (options.html) {

@@ -5,11 +5,13 @@ import {
   firstString,
   freshnessCode,
   isObject,
+  isString,
   makeMetadata,
   makeResult,
   makeSuccess,
   mergeParams,
   normalizeDate,
+  queryParams,
   singleQuery,
 } from "../core/utils.js";
 import type { EngineAdapter } from "../types/index.js";
@@ -55,11 +57,9 @@ export const braveAdapter: EngineAdapter = {
       );
     }
 
-    const freshness = input.dateRange
-      ? dateRangeString(input.dateRange)
-      : input.freshness
-        ? freshnessCode(input.freshness)
-        : undefined;
+    const freshness =
+      dateRangeString(input.dateRange) ??
+      (input.freshness ? freshnessCode(input.freshness) : undefined);
     const mapped = {
       q: query,
       count,
@@ -74,10 +74,11 @@ export const braveAdapter: EngineAdapter = {
       method: "GET",
       url: config.baseUrl ?? endpoint,
       headers: { "X-Subscription-Token": config.apiKey },
-      query: mergeParams("brave", config, mapped, input.overrides) as Record<
-        string,
-        boolean | number | string | string[] | undefined
-      >,
+      query: queryParams(
+        "brave",
+        mergeParams("brave", config, mapped, input.overrides),
+        warnings,
+      ),
     };
   },
   parseResponse(response, ctx) {
@@ -161,5 +162,3 @@ const thumbnail = (value: unknown): string | null => {
 
   return isObject(value) ? firstString(value.src, value.url) : null;
 };
-
-const isString = (value: unknown): value is string => typeof value === "string";

@@ -9,3 +9,5 @@ coverage
 package-lock.json
 yarn.lock
 report/
+reviews_triage/
+triage_decisions.db

@@ -42,7 +42,9 @@ export const createSearchClient = (
     .map(([engine, config]) => {
       const adapter = adapters.get(engine);
       if (!adapter) {
-        throw new Error(`Unknown engine id: ${engine}`);
+        throw new Error(
+          `Unknown engine id: ${engine}. Register custom engines with options.adapters.`,
+        );
       }
 
       const parsedConfig = adapter.configSchema.parse(
@@ -53,13 +55,14 @@ export const createSearchClient = (
 
   return {
     search: async (query, requestOptions) => {
+      const parsedQuery = QueryInputSchema.parse(query);
       const entries = await Promise.all(
         selected.map(async ({ adapter, config }) => [
           adapter.id,
           await runEngine({
             adapter,
             config,
-            query,
+            query: parsedQuery,
             clientOptions: options,
             requestOptions,
           }),
@@ -68,13 +71,15 @@ export const createSearchClient = (
 
       return Object.fromEntries(entries) as SearchResponse;
     },
-    searchStream: (query, requestOptions) =>
-      streamEngines({
+    searchStream: (query, requestOptions) => {
+      const parsedQuery = QueryInputSchema.parse(query);
+      return streamEngines({
         selected,
-        query,
+        query: parsedQuery,
         clientOptions: options,
         requestOptions,
-      }),
+      });
+    },
   };
 };
 
@@ -109,10 +114,9 @@ const runEngine = async (input: {
   clientOptions: SearchClientOptions;
   requestOptions?: SearchRequestOptions;
 }): Promise<EngineResult> => {
-  const query = QueryInputSchema.parse(input.query);
   const warnings = collectUnsupportedWarnings(
     input.adapter,
-    query,
+    input.query,
     input.config,
   );
 
@@ -129,7 +133,11 @@ const runEngine = async (input: {
 
   const fetchImpl = resolveFetch(input.config, input.clientOptions.fetch);
   const hooks = mergedHooks(input);
-  const request = input.adapter.buildRequest(query, input.config, warnings);
+  const request = input.adapter.buildRequest(
+    input.query,
+    input.config,
+    warnings,
+  );
 
   const result = await executeWithRetries({
     engine: input.adapter.id,
@@ -142,7 +150,7 @@ const runEngine = async (input: {
     parse: (response, latencyMs, rateLimit) =>
       input.adapter.parseResponse(response, {
         engine: input.adapter.id,
-        query,
+        query: input.query,
         config: input.config,
         latencyMs,
         httpStatus: response.status,
@@ -168,19 +176,38 @@ const streamEngines = (input: {
   clientOptions: SearchClientOptions;
   requestOptions?: SearchRequestOptions;
 }): AsyncIterable<EngineStreamEvent> => {
-  const queue = new AsyncQueue<EngineStreamEvent>();
+  const controller = new AbortController();
+  const callerSignal = input.requestOptions?.signal;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  const cleanupCallerSignal = () => {
+    callerSignal?.removeEventListener("abort", abortFromCaller);
+  };
+  if (callerSignal?.aborted) {
+    controller.abort(callerSignal.reason);
+  } else {
+    callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
+
+  const queue = new AsyncQueue<EngineStreamEvent>(() => {
+    controller.abort();
+    cleanupCallerSignal();
+  });
   let pending = input.selected.length;
 
   if (pending === 0) {
     queue.close();
+    cleanupCallerSignal();
     return queue;
   }
 
   for (const { adapter, config } of input.selected) {
     void (async () => {
       try {
-        const query = QueryInputSchema.parse(input.query);
-        const warnings = collectUnsupportedWarnings(adapter, query, config);
+        const warnings = collectUnsupportedWarnings(
+          adapter,
+          input.query,
+          config,
+        );
         const hooks = mergeHooks(
           input.clientOptions.hooks,
           input.requestOptions?.hooks,
@@ -200,11 +227,11 @@ const streamEngines = (input: {
 
         if (adapter.supportsStreaming && adapter.openStream) {
           const fetchImpl = resolveFetch(config, input.clientOptions.fetch);
-          for await (const event of adapter.openStream(query, config, {
-            query,
+          for await (const event of adapter.openStream(input.query, config, {
+            query: input.query,
             config,
             fetch: fetchImpl,
-            signal: input.requestOptions?.signal,
+            signal: controller.signal,
             hooks,
             warnings,
           })) {
@@ -216,9 +243,12 @@ const streamEngines = (input: {
         const result = await runEngine({
           adapter,
           config,
-          query,
+          query: input.query,
           clientOptions: input.clientOptions,
-          requestOptions: input.requestOptions,
+          requestOptions: {
+            ...input.requestOptions,
+            signal: controller.signal,
+          },
         });
         emitTerminalEvents(queue, adapter.id, result);
       } catch (cause) {
@@ -246,6 +276,7 @@ const streamEngines = (input: {
         pending -= 1;
         if (pending === 0) {
           queue.close();
+          cleanupCallerSignal();
         }
       }
     })();
@@ -260,6 +291,9 @@ const emitTerminalEvents = (
   result: EngineResult,
 ): void => {
   if (result.ok) {
+    if (result.answer) {
+      queue.push({ engine, type: "answer_done", answer: result.answer });
+    }
     queue.push({ engine, type: "results", results: result.results });
     queue.push({ engine, type: "metadata", metadata: result.metadata });
   } else {

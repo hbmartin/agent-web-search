@@ -88,6 +88,190 @@ describe("createSearchClient", () => {
     expect(onSettled).toHaveBeenCalledOnce();
   });
 
+  it("redacts auth headers in request telemetry", async () => {
+    const onRequest = vi.fn();
+    const fetch = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        expect((init?.headers as Record<string, string>)["x-api-key"]).toBe(
+          "exa-key",
+        );
+        return jsonResponse({ results: [] });
+      },
+    );
+    const client = createSearchClient(
+      {
+        exa: {
+          apiKey: "exa-key",
+          hooks: { onRequest },
+        },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    await client.search({ query: "redact" });
+
+    expect(onRequest).toHaveBeenCalledOnce();
+    expect(onRequest.mock.calls[0]?.[0].request.headers["x-api-key"]).toBe(
+      "[redacted]",
+    );
+  });
+
+  it("returns a non-retryable failure for a pre-aborted signal", async () => {
+    const fetch = vi.fn(async () => jsonResponse({ results: [] }));
+    const abort = new AbortController();
+    abort.abort("caller");
+    const client = createSearchClient(
+      { exa: { apiKey: "exa-key" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search(
+      { query: "abort" },
+      { signal: abort.signal },
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(response.exa?.ok).toBe(false);
+    expect(!response.exa?.ok && response.exa?.error.message).toBe(
+      "Request aborted",
+    );
+    expect(!response.exa?.ok && response.exa?.error.retryable).toBe(false);
+  });
+
+  it("does not retry caller aborts that happen in flight", async () => {
+    const abort = new AbortController();
+    const fetch = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) =>
+        await new Promise<Response>((_resolve, reject) => {
+          (init?.signal as AbortSignal).addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            { once: true },
+          );
+        }),
+    );
+    const client = createSearchClient(
+      {
+        exa: {
+          apiKey: "exa-key",
+          retry: { initialDelayMs: 0, jitter: false },
+        },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const pending = client.search({ query: "abort" }, { signal: abort.signal });
+    abort.abort("caller");
+    const response = await pending;
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(response.exa?.ok).toBe(false);
+    expect(!response.exa?.ok && response.exa?.error.message).toBe(
+      "Request aborted",
+    );
+  });
+
+  it("classifies fetch rejections as network errors", async () => {
+    const fetch = vi.fn(async () => {
+      throw new TypeError("getaddrinfo ENOTFOUND example.test");
+    });
+    const client = createSearchClient(
+      { exa: { apiKey: "exa-key", maxRetries: 0 } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({ query: "network" });
+
+    expect(response.exa?.ok).toBe(false);
+    expect(!response.exa?.ok && response.exa?.error.kind).toBe("network");
+    expect(!response.exa?.ok && response.exa?.error.message).toBe(
+      "Request failed",
+    );
+  });
+
+  it("cleans abort listeners after retryable network errors", async () => {
+    const abort = new AbortController();
+    const addEventListener = vi.spyOn(abort.signal, "addEventListener");
+    const removeEventListener = vi.spyOn(abort.signal, "removeEventListener");
+    const fetch = vi.fn(async () => {
+      throw new TypeError("temporary network failure");
+    });
+    const client = createSearchClient(
+      {
+        exa: {
+          apiKey: "exa-key",
+          retry: { initialDelayMs: 0, jitter: false },
+        },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    await client.search({ query: "network" }, { signal: abort.signal });
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(removeEventListener).toHaveBeenCalledTimes(
+      addEventListener.mock.calls.length,
+    );
+  });
+
+  it("composes telemetry hooks and isolates hook failures", async () => {
+    const events: string[] = [];
+    const fetch = vi.fn(async () => jsonResponse({ results: [] }));
+    const client = createSearchClient(
+      {
+        exa: {
+          apiKey: "exa-key",
+          hooks: {
+            onSettled: () => events.push("config"),
+          },
+        },
+      },
+      {
+        fetch: fetch as typeof globalThis.fetch,
+        hooks: {
+          onSettled: () => events.push("client"),
+        },
+      },
+    );
+
+    const response = await client.search(
+      { query: "hooks" },
+      {
+        hooks: {
+          onSettled: () => {
+            events.push("request");
+            throw new Error("ignored telemetry failure");
+          },
+        },
+      },
+    );
+
+    expect(response.exa?.ok).toBe(true);
+    expect(events).toEqual(["client", "request", "config"]);
+  });
+
+  it("validates query input once before fetching", async () => {
+    const fetch = vi.fn(async () => jsonResponse({ results: [] }));
+    const client = createSearchClient(
+      { exa: { apiKey: "exa-key" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    await expect(
+      client.search({
+        query: "dates",
+        dateRange: { start: "not-a-date" },
+      }),
+    ).rejects.toThrow("Invalid date");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("explains how to register unknown engine ids", () => {
+    expect(() => createSearchClient({ custom: { apiKey: "key" } })).toThrow(
+      "options.adapters",
+    );
+  });
+
   it("returns unsupported failures without fetching when configured to error", async () => {
     const fetch = vi.fn();
     const client = createSearchClient(
