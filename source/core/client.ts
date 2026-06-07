@@ -292,6 +292,8 @@ const emitTerminalEvents = (
 ): void => {
   if (result.ok) {
     if (result.answer) {
+      // Non-streaming adapters can still return an answer; emit the same
+      // terminal answer event before result events for stream consumers.
       queue.push({ engine, type: "answer_done", answer: result.answer });
     }
     queue.push({ engine, type: "results", results: result.results });

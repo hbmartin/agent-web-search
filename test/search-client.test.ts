@@ -117,6 +117,76 @@ describe("createSearchClient", () => {
     );
   });
 
+  it("redacts cookie headers in request telemetry", async () => {
+    const onRequest = vi.fn();
+    const cookieAdapter = defineEngine({
+      id: "cookie",
+      configSchema: EngineConfigSchema,
+      capabilities: {
+        answer: false,
+        content: false,
+        streaming: false,
+        multiQuery: false,
+        params: {
+          count: false,
+          dateRange: false,
+          freshness: false,
+          includeDomains: false,
+          excludeDomains: false,
+          country: false,
+          language: false,
+          safeSearch: false,
+        },
+        verticals: ["web"],
+      },
+      buildRequest() {
+        return {
+          method: "GET",
+          url: "https://cookie.test/search",
+          headers: {
+            Cookie: "session=secret",
+            "Set-Cookie": "session=secret",
+          },
+        };
+      },
+      parseResponse() {
+        return {
+          ok: true,
+          engine: "cookie",
+          results: [],
+          metadata: {
+            engine: "cookie",
+            latencyMs: 1,
+            httpStatus: 200,
+            requestId: null,
+            totalResults: 0,
+            usage: null,
+            rateLimit: null,
+            warnings: [],
+          },
+        };
+      },
+    } satisfies EngineAdapter);
+    const fetch = vi.fn(async () => jsonResponse({ results: [] }));
+    const client = createSearchClient(
+      { cookie: { apiKey: "key", hooks: { onRequest } } },
+      {
+        adapters: [cookieAdapter],
+        fetch: fetch as typeof globalThis.fetch,
+      },
+    );
+
+    await client.search({ query: "redact" });
+
+    expect(onRequest).toHaveBeenCalledOnce();
+    expect(onRequest.mock.calls[0]?.[0].request.headers.Cookie).toBe(
+      "[redacted]",
+    );
+    expect(onRequest.mock.calls[0]?.[0].request.headers["Set-Cookie"]).toBe(
+      "[redacted]",
+    );
+  });
+
   it("returns a non-retryable failure for a pre-aborted signal", async () => {
     const fetch = vi.fn(async () => jsonResponse({ results: [] }));
     const abort = new AbortController();
@@ -188,6 +258,34 @@ describe("createSearchClient", () => {
     expect(!response.exa?.ok && response.exa?.error.message).toBe(
       "Request failed",
     );
+  });
+
+  it("applies request timeouts to response body reads", async () => {
+    const fetch = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              (init?.signal as AbortSignal).addEventListener(
+                "abort",
+                () => controller.error(new Error("aborted")),
+                { once: true },
+              );
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    const client = createSearchClient(
+      { exa: { apiKey: "exa-key", maxRetries: 0, timeoutMs: 1 } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({ query: "slow body" });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(response.exa?.ok).toBe(false);
+    expect(!response.exa?.ok && response.exa?.error.kind).toBe("timeout");
   });
 
   it("cleans abort listeners after retryable network errors", async () => {

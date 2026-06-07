@@ -233,6 +233,8 @@ export const executeWithRetries = async (input: {
         controller.abort(input.signal.reason);
       }
 
+      // timeoutMs is a total network deadline for an attempt: connection,
+      // headers, and the response body read share the same abort signal.
       const response = await input.fetch(url, {
         method: input.request.method,
         headers: {
@@ -397,7 +399,9 @@ const shouldRetry = (
 const isSensitiveHeader = (name: string): boolean =>
   [
     "authorization",
+    "cookie",
     "proxy-authorization",
+    "set-cookie",
     "x-api-key",
     "x-subscription-token",
   ].includes(name.toLowerCase());
