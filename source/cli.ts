@@ -12,6 +12,7 @@ import {
   type EnginesConfig,
   type FetchLike,
   type QueryInput,
+  QueryInputSchema,
 } from "./index.js";
 
 const envNames: Record<EngineId, string> = {
@@ -75,6 +76,12 @@ export const main = async (
     return 1;
   }
 
+  const count = parseCount(parsed.values.count);
+  if (parsed.values.count && count === undefined) {
+    streams.stderr.write("Invalid --count. Pass a positive integer.\n");
+    return 1;
+  }
+
   const selectedEngines = normalizeEngines(parsed.values.engine);
   const engines = buildEngines(
     selectedEngines,
@@ -88,9 +95,9 @@ export const main = async (
     return 1;
   }
 
-  const query: QueryInput = {
+  const queryInput: QueryInput = {
     query: queryText,
-    ...(parsed.values.count ? { count: Number(parsed.values.count) } : {}),
+    ...(count === undefined ? {} : { count }),
     ...(isFreshness(parsed.values.freshness)
       ? { freshness: parsed.values.freshness }
       : {}),
@@ -109,16 +116,23 @@ export const main = async (
       ? { includeContent: parseContent(parsed.values.content) }
       : {}),
   };
+  const parsedQuery = QueryInputSchema.safeParse(queryInput);
+  if (!parsedQuery.success) {
+    streams.stderr.write(
+      `Invalid query: ${validationMessage(parsedQuery.error)}\n`,
+    );
+    return 1;
+  }
 
   const client = createSearchClient(engines, { fetch: fetchImpl });
   if (parsed.values.stream) {
-    for await (const event of client.searchStream(query)) {
+    for await (const event of client.searchStream(parsedQuery.data)) {
       streams.stdout.write(`${JSON.stringify(event)}\n`);
     }
     return 0;
   }
 
-  const response = await client.search(query);
+  const response = await client.search(parsedQuery.data);
   streams.stdout.write(
     parsed.values.ndjson
       ? `${JSON.stringify(response)}\n`
@@ -152,6 +166,15 @@ const splitValues = (values: string | string[]): string[] =>
     .flatMap((value) => value.split(","))
     .map((value) => value.trim())
     .filter(Boolean);
+
+const parseCount = (value: string | undefined): number | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const count = Number(value);
+  return Number.isInteger(count) && count > 0 ? count : undefined;
+};
 
 const parseContent = (
   value: string,
@@ -187,15 +210,35 @@ const isSafeSearch = (
   value === "off" || value === "moderate" || value === "strict";
 
 const packageVersion = (): string => {
-  try {
-    const packageJson = JSON.parse(
-      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-    ) as { version?: string };
-    return packageJson.version ?? "0.0.0";
-  } catch {
-    return "0.0.0";
+  for (const packageUrl of [
+    new URL("../package.json", import.meta.url),
+    new URL("../../package.json", import.meta.url),
+  ]) {
+    try {
+      const packageJson = JSON.parse(readFileSync(packageUrl, "utf8")) as {
+        version?: string;
+      };
+      return packageJson.version ?? "0.0.0";
+    } catch {
+      // Built source and dist files have different relative package roots.
+    }
   }
+
+  return "0.0.0";
 };
+
+const validationMessage = (error: {
+  issues: { message: string; path: PropertyKey[] }[];
+}): string =>
+  error.issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
+      return `${path}${issue.message}`;
+    })
+    .join("; ");
+
+const errorMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
 
 const helpText = (): string => `Usage
   agent-web-search --query "search terms" --engine brave --engine exa
@@ -227,7 +270,12 @@ const isMain =
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMain) {
-  void main().then((code) => {
-    process.exitCode = code;
-  });
+  void main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((cause) => {
+      process.stderr.write(`${errorMessage(cause)}\n`);
+      process.exitCode = 1;
+    });
 }

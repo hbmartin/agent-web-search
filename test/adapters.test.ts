@@ -53,6 +53,56 @@ describe("built-in adapters", () => {
     expect(response.brave?.ok && response.brave.raw).toBeTruthy();
   });
 
+  it("drops invalid Brave query defaults and reports warnings", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({ web: { results: [{ url: "https://brave.example" }] } }),
+    );
+    const client = createSearchClient(
+      {
+        brave: {
+          apiKey: "key",
+          defaults: {
+            market: "US",
+            nested: { bad: true },
+            notNumber: Number.NaN,
+          },
+        },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({ query: "cats" });
+
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("market")).toBe("US");
+    expect(url.searchParams.has("nested")).toBe(false);
+    expect(url.searchParams.has("notNumber")).toBe(false);
+    expect(
+      response.brave?.ok
+        ? response.brave.metadata.warnings.map((warning) => warning.param)
+        : [],
+    ).toEqual(["nested", "notNumber"]);
+  });
+
+  it("falls back to Brave freshness when dateRange is empty", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({ web: { results: [{ url: "https://brave.example" }] } }),
+    );
+    const client = createSearchClient(
+      { brave: { apiKey: "key" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    await client.search({
+      query: "cats",
+      dateRange: {},
+      freshness: "day",
+    });
+
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("freshness")).toBe("pd");
+  });
+
   it("maps Ceramic body and warnings for unsupported common params", async () => {
     const fetch = vi.fn(async () =>
       jsonResponse({
@@ -199,10 +249,45 @@ describe("built-in adapters", () => {
     ).toBe("<p>HTML</p>");
   });
 
+  it("maps Firecrawl text requests to markdown when markdown is false", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          web: [
+            {
+              url: "https://firecrawl.example",
+              title: "Firecrawl",
+              markdown: "Markdown",
+            },
+          ],
+        },
+      }),
+    );
+    const client = createSearchClient(
+      { firecrawl: { apiKey: "key" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({
+      query: "crawl",
+      includeContent: { text: true, markdown: false },
+    });
+    const init = fetch.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+
+    expect(body.scrapeOptions.formats).toEqual([{ type: "markdown" }]);
+    expect(
+      response.firecrawl?.ok
+        ? response.firecrawl.metadata.warnings[0]?.message
+        : "",
+    ).toContain("maps text requests to markdown");
+  });
+
   it("maps Sonar answer, citations, and search results", async () => {
     const fetch = vi.fn(async () =>
       jsonResponse({
         choices: [{ message: { content: "Answer text" } }],
+        citations: [{ href: "https://citation.example", title: "Citation" }],
         search_results: [
           {
             url: "https://sonar.example",
@@ -221,15 +306,26 @@ describe("built-in adapters", () => {
     const response = await client.search({
       query: "answer",
       language: "en",
+      dateRange: {
+        start: "2026-06-01T00:00:00Z",
+        end: "2026-06-07",
+      },
       includeDomains: ["example.com"],
     });
     const init = fetch.mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(init.body));
 
     expect(body.search_language_filter).toEqual(["en"]);
+    expect(body.search_after_date_filter).toBe("06/01/2026");
+    expect(body.search_before_date_filter).toBe("06/07/2026");
     expect(response.sonar?.ok && response.sonar.answer?.text).toBe(
       "Answer text",
     );
+    expect(response.sonar?.ok && response.sonar.answer?.citations[0]).toEqual({
+      url: "https://citation.example",
+      title: "Citation",
+      marker: 1,
+    });
     expect(response.sonar?.ok && response.sonar.results[0]?.title).toBe(
       "Sonar source",
     );

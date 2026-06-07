@@ -1,4 +1,9 @@
-import { buildUrl, classifyHttpError, parseRateLimit } from "../core/http.js";
+import {
+  buildUrl,
+  classifyHttpError,
+  parseRateLimit,
+  redactHeaders,
+} from "../core/http.js";
 import {
   asArray,
   firstString,
@@ -84,7 +89,7 @@ export const sonarAdapter: EngineAdapter = {
       attempt: 1,
       request: {
         method: request.method,
-        headers: request.headers ?? {},
+        headers: redactHeaders(request.headers),
         body: request.body,
       },
     });
@@ -260,15 +265,22 @@ const answerFromRaw = (
       ? rawCitations
           .map((citation, index) => ({
             url:
-              typeof citation === "string" ? citation : firstString(citation),
-            title: null,
+              typeof citation === "string"
+                ? citation
+                : isObject(citation)
+                  ? firstString(citation.url, citation.href)
+                  : null,
+            title: isObject(citation) ? firstString(citation.title) : null,
             marker: index + 1,
           }))
           .filter(
             (
               citation,
-            ): citation is { url: string; title: null; marker: number } =>
-              Boolean(citation.url),
+            ): citation is {
+              url: string;
+              title: string | null;
+              marker: number;
+            } => Boolean(citation.url),
           )
       : results.map((result, index) => ({
           url: result.url,
@@ -304,33 +316,52 @@ async function* readSseJson(
   body: ReadableStream<Uint8Array>,
 ): AsyncIterable<unknown> {
   const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  try {
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (!line.startsWith("data:")) {
-        continue;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
       }
 
-      const data = line.slice(5).trim();
-      if (!data || data === "[DONE]") {
-        continue;
-      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
 
-      yield parseMaybeJson(data);
+      for (const line of lines) {
+        const parsed = parseSseLine(line);
+        if (parsed !== undefined) {
+          yield parsed;
+        }
+      }
     }
+
+    buffer += decoder.decode();
+    for (const line of buffer.split(/\r?\n/)) {
+      const parsed = parseSseLine(line);
+      if (parsed !== undefined) {
+        yield parsed;
+      }
+    }
+  } finally {
+    reader.releaseLock();
   }
 }
+
+const parseSseLine = (line: string): unknown | undefined => {
+  if (!line.startsWith("data:")) {
+    return undefined;
+  }
+
+  const data = line.slice(5).trim();
+  if (!data || data === "[DONE]") {
+    return undefined;
+  }
+
+  return parseMaybeJson(data);
+};
 
 const parseMaybeJson = (value: string): unknown => {
   try {

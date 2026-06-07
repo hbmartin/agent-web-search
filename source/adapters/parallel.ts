@@ -3,6 +3,7 @@ import {
   firstString,
   freshnessStartDate,
   isObject,
+  isString,
   makeMetadata,
   makeResult,
   makeSuccess,
@@ -127,5 +128,3 @@ const usage = (raw: unknown) => {
       .map(([name, count]) => ({ name, count: count as number })),
   };
 };
-
-const isString = (value: unknown): value is string => typeof value === "string";

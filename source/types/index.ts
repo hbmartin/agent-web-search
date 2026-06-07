@@ -1,6 +1,48 @@
 import type { ZodType } from "zod";
 import { z } from "zod";
 
+const dateOnlyPattern = /^\d{4}-\d{2}-\d{2}$/;
+const isoDateInputPattern = /^\d{4}-\d{2}-\d{2}(?:$|T)/;
+
+const normalizeDateInput = (value: string): string | null => {
+  const trimmed = value.trim();
+  if (!isoDateInputPattern.test(trimmed)) {
+    return null;
+  }
+
+  const dateOnly = trimmed.slice(0, 10);
+  if (!isValidDateOnly(dateOnly)) {
+    return null;
+  }
+
+  if (dateOnlyPattern.test(trimmed)) {
+    return trimmed;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed.toISOString().slice(0, 10);
+};
+
+const isValidDateOnly = (value: string): boolean => {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!(year && month && day)) {
+    return false;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.toISOString().slice(0, 10) === value;
+};
+
+const DateOnlySchema = z
+  .string()
+  .trim()
+  .refine((value) => normalizeDateInput(value) !== null, {
+    message: "Invalid date. Use YYYY-MM-DD or a valid ISO timestamp.",
+  })
+  .transform((value) => normalizeDateInput(value) as string);
+
 export const builtInEngineIds = [
   "brave",
   "ceramic",
@@ -39,8 +81,8 @@ export const QueryInputSchema = z
     count: z.number().int().positive().optional(),
     dateRange: z
       .object({
-        start: z.string().optional(),
-        end: z.string().optional(),
+        start: DateOnlySchema.optional(),
+        end: DateOnlySchema.optional(),
       })
       .strict()
       .optional(),

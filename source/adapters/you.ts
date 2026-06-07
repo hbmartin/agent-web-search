@@ -5,11 +5,13 @@ import {
   dateRangeString,
   firstString,
   isObject,
+  isString,
   makeMetadata,
   makeResult,
   makeSuccess,
   mergeParams,
   normalizeDate,
+  queryParams,
   singleQuery,
   truncateContent,
 } from "../core/utils.js";
@@ -17,6 +19,7 @@ import type {
   ContentOptions,
   EngineAdapter,
   ResultContent,
+  Warning,
 } from "../types/index.js";
 import { EngineConfigSchema } from "../types/index.js";
 
@@ -78,7 +81,7 @@ export const youAdapter: EngineAdapter = {
       url: config.baseUrl ?? endpoint,
       headers: { "X-API-Key": config.apiKey },
       ...(method === "GET"
-        ? { query: stringifyArrays(merged) }
+        ? { query: stringifyArrays(merged, warnings) }
         : { body: merged }),
     };
   },
@@ -162,13 +165,18 @@ const shouldPost = (params: Record<string, unknown>): boolean =>
 
 const stringifyArrays = (
   params: Record<string, unknown>,
-): Record<string, boolean | number | string | undefined> =>
-  Object.fromEntries(
-    Object.entries(params).map(([key, value]) => [
-      key,
-      Array.isArray(value) ? value.join(",") : value,
-    ]),
-  ) as Record<string, boolean | number | string | undefined>;
+  warnings: Warning[],
+): Record<string, boolean | number | string | undefined> => {
+  const stringified: Record<string, boolean | number | string | undefined> = {};
+
+  for (const [key, value] of Object.entries(
+    queryParams("you", params, warnings),
+  )) {
+    stringified[key] = Array.isArray(value) ? value.join(",") : value;
+  }
+
+  return stringified;
+};
 
 const extractResults = (raw: unknown): Record<string, unknown>[] => {
   if (!isObject(raw) || !isObject(raw.results)) {
@@ -203,5 +211,3 @@ const requestId = (raw: unknown): string | null => {
 
   return firstString(raw.metadata.search_uuid);
 };
-
-const isString = (value: unknown): value is string => typeof value === "string";

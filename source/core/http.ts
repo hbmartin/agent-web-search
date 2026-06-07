@@ -107,13 +107,26 @@ export const networkError = (
   kind: "network" | "timeout",
   message: string,
   cause?: unknown,
+  retryable = true,
 ): SearchEngineError => ({
   kind,
   message,
   status: null,
-  retryable: true,
+  retryable,
   cause,
 });
+
+export const redactHeaders = (
+  headers: Record<string, string> | undefined,
+): Record<string, string> => {
+  const redacted: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    redacted[key] = isSensitiveHeader(key) ? "[redacted]" : value;
+  }
+
+  return redacted;
+};
 
 export const unsupportedFailure = (
   engine: string,
@@ -162,6 +175,22 @@ export const executeWithRetries = async (input: {
   const start = Date.now();
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    if (input.signal?.aborted) {
+      return makeHttpFailure({
+        engine: input.engine,
+        error: networkError(
+          "network",
+          "Request aborted",
+          input.signal.reason,
+          false,
+        ),
+        latencyMs: Date.now() - start,
+        httpStatus: null,
+        rateLimit: null,
+        warnings: input.warnings,
+      });
+    }
+
     const attemptStart = Date.now();
     safeHook(input.hooks, "onRequest", {
       engine: input.engine,
@@ -169,16 +198,40 @@ export const executeWithRetries = async (input: {
       attempt: attempt + 1,
       request: {
         method: input.request.method,
-        headers: input.request.headers ?? {},
+        headers: redactHeaders(input.request.headers),
         body: input.request.body,
       },
     });
 
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let abortOriginal: (() => void) | undefined;
+    let cleanedUp = false;
+    const cleanupAttempt = () => {
+      if (cleanedUp) {
+        return;
+      }
+
+      cleanedUp = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      if (abortOriginal) {
+        input.signal?.removeEventListener("abort", abortOriginal);
+      }
+    };
+
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort("timeout"), timeoutMs);
-      const abortOriginal = () => controller.abort(input.signal?.reason);
+      timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort("timeout");
+      }, timeoutMs);
+      abortOriginal = () => controller.abort(input.signal?.reason);
       input.signal?.addEventListener("abort", abortOriginal, { once: true });
+      if (input.signal?.aborted) {
+        controller.abort(input.signal.reason);
+      }
 
       const response = await input.fetch(url, {
         method: input.request.method,
@@ -195,9 +248,6 @@ export const executeWithRetries = async (input: {
             : JSON.stringify(input.request.body),
         signal: controller.signal,
       });
-
-      clearTimeout(timeout);
-      input.signal?.removeEventListener("abort", abortOriginal);
 
       const text = await response.text();
       const raw = parseResponseText(text);
@@ -249,6 +299,7 @@ export const executeWithRetries = async (input: {
         });
       }
 
+      cleanupAttempt();
       await delayForRetry({
         attempt,
         error,
@@ -256,15 +307,15 @@ export const executeWithRetries = async (input: {
         retryPolicy,
         hooks: input.hooks,
         engine: input.engine,
+        signal: input.signal,
       });
     } catch (cause) {
-      const abortedByCaller = input.signal?.aborted;
-      const kind = abortedByCaller ? "network" : "timeout";
-      const error = networkError(
-        kind,
-        abortedByCaller ? "Request aborted" : "Request timed out",
-        cause,
-      );
+      const abortedByCaller = input.signal?.aborted === true;
+      const error = abortedByCaller
+        ? networkError("network", "Request aborted", cause, false)
+        : timedOut
+          ? networkError("timeout", "Request timed out", cause)
+          : networkError("network", "Request failed", cause);
 
       if (!shouldRetry(error, attempt, maxRetries)) {
         return makeHttpFailure({
@@ -277,13 +328,30 @@ export const executeWithRetries = async (input: {
         });
       }
 
-      await delayForRetry({
-        attempt,
-        error,
-        retryPolicy,
-        hooks: input.hooks,
-        engine: input.engine,
-      });
+      cleanupAttempt();
+      try {
+        await delayForRetry({
+          attempt,
+          error,
+          retryPolicy,
+          hooks: input.hooks,
+          engine: input.engine,
+          signal: input.signal,
+        });
+      } catch (delayCause) {
+        return makeHttpFailure({
+          engine: input.engine,
+          error: input.signal?.aborted
+            ? networkError("network", "Request aborted", delayCause, false)
+            : networkError("network", "Request failed", delayCause),
+          latencyMs: Date.now() - start,
+          httpStatus: null,
+          rateLimit: null,
+          warnings: input.warnings,
+        });
+      }
+    } finally {
+      cleanupAttempt();
     }
   }
 
@@ -326,6 +394,14 @@ const shouldRetry = (
   return true;
 };
 
+const isSensitiveHeader = (name: string): boolean =>
+  [
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "x-subscription-token",
+  ].includes(name.toLowerCase());
+
 const delayForRetry = async (input: {
   attempt: number;
   error: SearchEngineError;
@@ -338,6 +414,7 @@ const delayForRetry = async (input: {
   };
   hooks?: TelemetryHooks;
   engine: string;
+  signal?: AbortSignal;
 }): Promise<void> => {
   const retryAfter = input.response?.headers.get("retry-after");
   const retryAfterMs = retryAfter ? Number(retryAfter) * 1000 : undefined;
@@ -359,7 +436,26 @@ const delayForRetry = async (input: {
     error: input.error,
   });
 
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  await new Promise<void>((resolve, reject) => {
+    if (input.signal?.aborted) {
+      reject(input.signal.reason);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      input.signal?.removeEventListener("abort", abortRetry);
+      resolve();
+    }, delayMs);
+    const abortRetry = () => {
+      clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", abortRetry);
+      reject(input.signal?.reason);
+    };
+    input.signal?.addEventListener("abort", abortRetry, { once: true });
+    if (input.signal?.aborted) {
+      abortRetry();
+    }
+  });
 };
 
 const makeHttpFailure = (input: {

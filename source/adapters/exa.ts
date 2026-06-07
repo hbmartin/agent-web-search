@@ -5,6 +5,7 @@ import {
   firstString,
   freshnessStartDate,
   isObject,
+  isString,
   makeMetadata,
   makeResult,
   makeSuccess,
@@ -157,5 +158,3 @@ const exaContent = (item: Record<string, unknown>): ResultContent | null => {
 
   return Object.keys(content).length > 0 ? content : null;
 };
-
-const isString = (value: unknown): value is string => typeof value === "string";

@@ -22,6 +22,9 @@ export const singleQuery = (query: string | string[]): string =>
 export const queryArray = (query: string | string[]): string[] =>
   Array.isArray(query) ? query : [query];
 
+export const isString = (value: unknown): value is string =>
+  typeof value === "string";
+
 export const contentOptions = (
   includeContent: boolean | ContentOptions | undefined,
 ): ContentOptions | null => {
@@ -57,7 +60,58 @@ export const safeHook = <K extends keyof TelemetryHooks>(
 export const mergeHooks = (
   ...hooks: (TelemetryHooks | undefined)[]
 ): TelemetryHooks | undefined => {
-  const merged = Object.assign({}, ...hooks.filter(Boolean));
+  const defined = hooks.filter((hook): hook is TelemetryHooks => Boolean(hook));
+  if (defined.length === 0) {
+    return undefined;
+  }
+
+  const compose = <K extends keyof TelemetryHooks>(
+    name: K,
+  ): TelemetryHooks[K] | undefined => {
+    const fns = defined
+      .map((hook) => hook[name])
+      .filter(
+        (fn): fn is NonNullable<TelemetryHooks[K]> => typeof fn === "function",
+      );
+
+    if (fns.length === 0) {
+      return undefined;
+    }
+
+    return ((payload: unknown) => {
+      for (const fn of fns) {
+        try {
+          (fn as (ctx: unknown) => void)(payload);
+        } catch {
+          // Telemetry is observational only and must never affect search results.
+        }
+      }
+    }) as TelemetryHooks[K];
+  };
+
+  const merged: TelemetryHooks = {};
+  const onRequest = compose("onRequest");
+  const onResponse = compose("onResponse");
+  const onRetry = compose("onRetry");
+  const onError = compose("onError");
+  const onSettled = compose("onSettled");
+
+  if (onRequest) {
+    merged.onRequest = onRequest;
+  }
+  if (onResponse) {
+    merged.onResponse = onResponse;
+  }
+  if (onRetry) {
+    merged.onRetry = onRetry;
+  }
+  if (onError) {
+    merged.onError = onError;
+  }
+  if (onSettled) {
+    merged.onSettled = onSettled;
+  }
+
   return Object.keys(merged).length === 0 ? undefined : merged;
 };
 
@@ -71,11 +125,12 @@ export const normalizeDate = (value: unknown): string | null => {
 };
 
 export const mmddyyyy = (isoDate: string | undefined): string | undefined => {
-  if (!isoDate) {
+  const dateOnly = dateOnlyPart(isoDate);
+  if (!dateOnly) {
     return undefined;
   }
 
-  const [year, month, day] = isoDate.split("-");
+  const [year, month, day] = dateOnly.split("-");
   return year && month && day ? `${month}/${day}/${year}` : undefined;
 };
 
@@ -129,7 +184,16 @@ export const dateRangeString = (
     return undefined;
   }
 
-  return `${dateRange.start ?? ""}to${dateRange.end ?? ""}`;
+  return `${dateOnlyPart(dateRange.start) ?? ""}to${
+    dateOnlyPart(dateRange.end) ?? ""
+  }`;
+};
+
+const dateOnlyPart = (value: string | undefined): string | undefined => {
+  const dateOnly = value?.trim().slice(0, 10);
+  return dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)
+    ? dateOnly
+    : undefined;
 };
 
 export const sourceFromUrl = (url: string): string | null => {
@@ -157,6 +221,39 @@ export const truncateContent = (
     ]),
   );
 };
+
+type QueryParamValue = boolean | number | string | string[] | undefined;
+
+export const queryParams = (
+  engine: string,
+  params: Record<string, unknown>,
+  warnings: Warning[],
+): Record<string, QueryParamValue> => {
+  const query: Record<string, QueryParamValue> = {};
+
+  for (const [key, value] of Object.entries(params)) {
+    if (isQueryParamValue(value)) {
+      query[key] = value;
+      continue;
+    }
+
+    addWarning(
+      warnings,
+      "invalid_query_param",
+      `${engine} query parameter ${key} was ignored because it is not a supported query value`,
+      key,
+    );
+  }
+
+  return query;
+};
+
+const isQueryParamValue = (value: unknown): value is QueryParamValue =>
+  value === undefined ||
+  typeof value === "boolean" ||
+  typeof value === "string" ||
+  (typeof value === "number" && Number.isFinite(value)) ||
+  (Array.isArray(value) && value.every((item) => typeof item === "string"));
 
 export const makeResult = (input: {
   url: string;
