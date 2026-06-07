@@ -1,0 +1,144 @@
+{
+  "bugs": {
+    "url": "https://github.com/hbmartin/agent-web-search/issues"
+  },
+  "homepage": "https://github.com/hbmartin/agent-web-search#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hbmartin/agent-web-search.git"
+  },
+  "author": "Harold Martin <harold.martin@gmail.com>",
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "description": "Client-first TypeScript search aggregation library for multiple web search providers.",
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./adapters": {
+      "import": {
+        "types": "./dist/esm/adapters/index.d.ts",
+        "default": "./dist/esm/adapters/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/index.d.cts",
+        "default": "./dist/cjs/adapters/index.js"
+      }
+    },
+    "./adapters/brave": {
+      "import": {
+        "types": "./dist/esm/adapters/brave.d.ts",
+        "default": "./dist/esm/adapters/brave.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/brave.d.cts",
+        "default": "./dist/cjs/adapters/brave.js"
+      }
+    },
+    "./adapters/ceramic": {
+      "import": {
+        "types": "./dist/esm/adapters/ceramic.d.ts",
+        "default": "./dist/esm/adapters/ceramic.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/ceramic.d.cts",
+        "default": "./dist/cjs/adapters/ceramic.js"
+      }
+    },
+    "./adapters/exa": {
+      "import": {
+        "types": "./dist/esm/adapters/exa.d.ts",
+        "default": "./dist/esm/adapters/exa.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/exa.d.cts",
+        "default": "./dist/cjs/adapters/exa.js"
+      }
+    },
+    "./adapters/firecrawl": {
+      "import": {
+        "types": "./dist/esm/adapters/firecrawl.d.ts",
+        "default": "./dist/esm/adapters/firecrawl.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/firecrawl.d.cts",
+        "default": "./dist/cjs/adapters/firecrawl.js"
+      }
+    },
+    "./adapters/parallel": {
+      "import": {
+        "types": "./dist/esm/adapters/parallel.d.ts",
+        "default": "./dist/esm/adapters/parallel.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/parallel.d.cts",
+        "default": "./dist/cjs/adapters/parallel.js"
+      }
+    },
+    "./adapters/sonar": {
+      "import": {
+        "types": "./dist/esm/adapters/sonar.d.ts",
+        "default": "./dist/esm/adapters/sonar.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/sonar.d.cts",
+        "default": "./dist/cjs/adapters/sonar.js"
+      }
+    },
+    "./adapters/you": {
+      "import": {
+        "types": "./dist/esm/adapters/you.d.ts",
+        "default": "./dist/esm/adapters/you.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/you.d.cts",
+        "default": "./dist/cjs/adapters/you.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "agent-web-search": "dist/esm/cli.js"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "sideEffects": false,
+  "types": "./dist/esm/index.d.ts",
+  "license": "MIT",
+  "name": "agent-web-search",
+  "resolutions": {
+    "@types/node": "^22"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && tsc -p tsconfig.cjs.json && node scripts/write-cjs-package.mjs",
+    "dev": "tsc --watch",
+    "format": "biome check --write",
+    "lint": "biome check --error-on-warnings",
+    "test": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.1.0",
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.15",
+    "@sindresorhus/tsconfig": "^8.1.0",
+    "@types/node": "^22",
+    "@vitest/coverage-istanbul": "^4.0.18",
+    "publint": "^0.3.17",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.18"
+  }
+}

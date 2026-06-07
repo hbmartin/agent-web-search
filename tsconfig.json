@@ -1,0 +1,16 @@
+{
+  "extends": "@sindresorhus/tsconfig",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "rootDir": "source",
+    "outDir": "dist",
+    "noUnusedLocals": false,
+    "noPropertyAccessFromIndexSignature": false,
+    "erasableSyntaxOnly": false
+  },
+  "include": ["source"]
+}
