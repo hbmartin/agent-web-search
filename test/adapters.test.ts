@@ -323,9 +323,9 @@ describe("built-in adapters", () => {
     expect(response.sonar?.ok && response.sonar.answer?.text).toBe(
       "Answer text",
     );
-    expect(
-      response.sonar?.ok && response.sonar.answer?.citations[0]?.url,
-    ).toBe("https://citation.example");
+    expect(response.sonar?.ok && response.sonar.answer?.citations[0]?.url).toBe(
+      "https://citation.example",
+    );
     expect(
       response.sonar?.ok && response.sonar.answer?.citations[0]?.marker,
     ).toBe(1);
