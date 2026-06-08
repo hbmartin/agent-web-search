@@ -104,7 +104,7 @@ for await (const event of stream) {
       console.log(`${event.engine} metadata:`, event.metadata);
       break;
     case "answer_done":
-      // event.result is the final EngineResult for this engine
+      // event.answer is the final Answer for this engine
       break;
     case "error":
       console.error(`${event.engine} error: ${event.error.message}`);
