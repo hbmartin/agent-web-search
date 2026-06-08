@@ -100,6 +100,12 @@ for await (const event of stream) {
     case "results":
       console.log(`\n${event.engine}: ${event.results.length} results`);
       break;
+    case "metadata":
+      console.log(`${event.engine} metadata:`, event.metadata);
+      break;
+    case "answer_done":
+      // event.answer is the final Answer for this engine
+      break;
     case "error":
       console.error(`${event.engine} error: ${event.error.message}`);
       break;
@@ -259,7 +265,7 @@ agent-web-search --query "best espresso machines" --engine brave --engine exa --
 
 By default it queries every engine that has a matching API key set in the environment.
 
-```
+```text
 Options
   -q, --query <text>            Search query. Positional text is also accepted.
   -e, --engine <id>             Engine id. Repeat or comma-separate.
