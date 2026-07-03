@@ -66,6 +66,36 @@ describe("execution strategies", () => {
     expect(response.exa?.ok).toBe(true);
   });
 
+  it("fallback deduplicates repeated order entries", async () => {
+    const seenUrls: string[] = [];
+    const fetch = vi.fn(
+      async (url: string | URL | Request): Promise<Response> => {
+        seenUrls.push(String(url));
+        return String(url).includes("ceramic")
+          ? jsonResponse("{}", 500)
+          : jsonResponse(okBody);
+      },
+    );
+    const client = createSearchClient(
+      {
+        ceramic: { apiKey: "a", maxRetries: 0 },
+        exa: { apiKey: "b" },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search(
+      { query: "q" },
+      { strategy: "fallback", order: ["ceramic", "ceramic", "exa"] },
+    );
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(
+      seenUrls.filter((url) => url.includes("ceramic")).length,
+    ).toBe(1);
+    expect(response.exa?.ok).toBe(true);
+  });
+
   it("race aborts slower engines once one succeeds", async () => {
     const fetch = vi.fn(
       async (
@@ -125,6 +155,23 @@ describe("execution strategies", () => {
     );
 
     const response = await client.search({ query: "q" }, { deadlineMs: 30 });
+
+    expect(response.exa?.ok).toBe(false);
+  });
+
+  it("negative deadlineMs fails engines instead of throwing", async () => {
+    const fetch = vi.fn(
+      async (
+        _url: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => hangUntilAbort(init?.signal as AbortSignal),
+    );
+    const client = createSearchClient(
+      { exa: { apiKey: "a", maxRetries: 0 } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({ query: "q" }, { deadlineMs: -1 });
 
     expect(response.exa?.ok).toBe(false);
   });
@@ -191,5 +238,43 @@ describe("cost budget and rate-limit gate", () => {
     expect(startTimes).toHaveLength(2);
     const gap = Math.abs((startTimes[1] ?? 0) - (startTimes[0] ?? 0));
     expect(gap).toBeGreaterThanOrEqual(50);
+  });
+
+  it("aborts while waiting for a concurrency slot", async () => {
+    let releaseFirst: ((response: Response) => void) | undefined;
+    let resolveFirstStarted: () => void = () => undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      resolveFirstStarted = resolve;
+    });
+    const fetch = vi.fn(
+      async (): Promise<Response> =>
+        new Promise((resolveResponse) => {
+          resolveFirstStarted();
+          releaseFirst = resolveResponse;
+        }),
+    );
+    const client = createSearchClient(
+      {
+        exa: {
+          apiKey: "a",
+          maxRetries: 0,
+          throttle: { maxConcurrent: 1 },
+        },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const first = client.search({ query: "q1" });
+    await firstStarted;
+    const controller = new AbortController();
+    const second = client.search({ query: "q2" }, { signal: controller.signal });
+    await Promise.resolve();
+    controller.abort(new Error("cancelled"));
+
+    const secondResponse = await second;
+    expect(secondResponse.exa?.ok).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    releaseFirst?.(jsonResponse(okBody));
+    await first;
   });
 });

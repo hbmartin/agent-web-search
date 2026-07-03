@@ -85,8 +85,7 @@ export class DispatchGate {
     const maxConcurrent = throttle.maxConcurrent ?? Number.POSITIVE_INFINITY;
 
     while (state.active >= maxConcurrent) {
-      throwIfAborted(signal);
-      await new Promise<void>((resolve) => state.waiters.push(resolve));
+      await waitForSlot(state, signal);
     }
     state.active += 1;
 
@@ -164,13 +163,45 @@ export class DispatchGate {
 
 const roundUsd = (value: number): number => Math.round(value * 10_000) / 10_000;
 
+const abortError = (signal?: AbortSignal): Error =>
+  signal?.reason instanceof Error
+    ? signal.reason
+    : new Error("Request aborted");
+
 const throwIfAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {
-    throw signal.reason instanceof Error
-      ? signal.reason
-      : new Error("Request aborted");
+    throw abortError(signal);
   }
 };
+
+const waitForSlot = (
+  state: EngineState,
+  signal?: AbortSignal,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(abortError(signal));
+    };
+    const cleanup = () => {
+      const index = state.waiters.indexOf(onReady);
+      if (index >= 0) {
+        state.waiters.splice(index, 1);
+      }
+      signal?.removeEventListener("abort", onAbort);
+    };
+
+    state.waiters.push(onReady);
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -181,11 +212,7 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
-      reject(
-        signal?.reason instanceof Error
-          ? signal.reason
-          : new Error("Request aborted"),
-      );
+      reject(abortError(signal));
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });

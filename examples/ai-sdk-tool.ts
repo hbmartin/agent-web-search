@@ -6,8 +6,13 @@
  */
 import { aiSdkWebSearchTool, createSearchClient } from "agent-web-search";
 
+const braveApiKey = process.env.BRAVE_API_KEY;
+if (!braveApiKey) {
+  throw new Error("Set BRAVE_API_KEY to run this example.");
+}
+
 const client = createSearchClient({
-  brave: { apiKey: process.env.BRAVE_API_KEY ?? "" },
+  brave: { apiKey: braveApiKey },
 });
 
 // The returned object matches the AI SDK's tool shape:

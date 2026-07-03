@@ -54,13 +54,15 @@ export const normalizeUrlForDedupe = (url: string): string => {
 
   const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
   const path = parsed.pathname.replace(/\/+$/, "");
-  const params = [...parsed.searchParams.entries()].filter(
-    ([key]) => !trackingParamPattern.test(key),
-  );
-  const query =
-    params.length > 0
-      ? `?${params.map(([key, value]) => `${key}=${value}`).join("&")}`
-      : "";
+  const params = new URLSearchParams();
+  for (const [key, value] of parsed.searchParams.entries()) {
+    if (!trackingParamPattern.test(key)) {
+      params.append(key, value);
+    }
+  }
+  params.sort();
+  const queryString = params.toString();
+  const query = queryString ? `?${queryString}` : "";
   return `${host}${path}${query}`;
 };
 
@@ -74,7 +76,7 @@ export const aggregate = (
   response: SearchResponse,
   options: AggregateOptions = {},
 ): AggregatedSearchResponse => {
-  const k = options.k ?? 60;
+  const k = normalizeRrfK(options.k);
   const normalize = options.normalizeUrl ?? normalizeUrlForDedupe;
   const merged = new Map<string, AggregatedResult>();
   const answers: Record<string, Answer> = {};
@@ -137,6 +139,11 @@ export const aggregate = (
     succeeded,
     failed,
   };
+};
+
+const normalizeRrfK = (value: number | undefined): number => {
+  const k = value ?? 60;
+  return Number.isFinite(k) ? Math.max(0, k) : 60;
 };
 
 /** Fill gaps in the merged result with fields from another engine's copy. */

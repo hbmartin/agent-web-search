@@ -62,6 +62,9 @@ export const createMcpHandler = (
     // Notifications (no id) never get a response.
     const id = message.id ?? null;
     const respond = message.id !== undefined;
+    if (!respond) {
+      return null;
+    }
 
     switch (message.method) {
       case "initialize": {
@@ -147,7 +150,21 @@ const isRequest = (message: unknown): message is JsonRpcRequest =>
   typeof message === "object" &&
   message !== null &&
   (message as JsonRpcRequest).jsonrpc === "2.0" &&
-  typeof (message as JsonRpcRequest).method === "string";
+  typeof (message as JsonRpcRequest).method === "string" &&
+  isRequestId((message as JsonRpcRequest).id) &&
+  isRequestParams((message as JsonRpcRequest).params);
+
+const isRequestId = (id: unknown): id is JsonRpcRequest["id"] =>
+  id === undefined ||
+  id === null ||
+  typeof id === "string" ||
+  typeof id === "number";
+
+const isRequestParams = (
+  params: unknown,
+): params is JsonRpcRequest["params"] =>
+  params === undefined ||
+  (typeof params === "object" && params !== null && !Array.isArray(params));
 
 const errorResponse = (
   id: number | string | null,

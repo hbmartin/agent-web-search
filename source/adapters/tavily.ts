@@ -13,6 +13,7 @@ import {
 } from "../core/utils.js";
 import type {
   Answer,
+  ContentOptions,
   EngineAdapter,
   KeyedEngineConfig,
   ResultContent,
@@ -71,7 +72,8 @@ export const tavilyAdapter: EngineAdapter<KeyedEngineConfig> = {
     const rawResults = isObject(raw)
       ? asArray(raw.results).filter(isObject)
       : [];
-    const maxChars = contentOptions(ctx.query.includeContent)?.maxChars;
+    const options = contentOptions(ctx.query.includeContent);
+    const maxChars = options?.maxChars;
     const results = rawResults
       .map((item) =>
         makeResult({
@@ -80,7 +82,7 @@ export const tavilyAdapter: EngineAdapter<KeyedEngineConfig> = {
           snippet: firstString(item.content),
           publishedDate: publishedDate(item),
           score: numberOrNull(item.score),
-          content: truncateContent(tavilyContent(item), maxChars),
+          content: truncateContent(tavilyContent(item, options), maxChars),
           raw: item,
         }),
       )
@@ -117,9 +119,18 @@ const publishedDate = (item: Record<string, unknown>): string | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 };
 
-const tavilyContent = (item: Record<string, unknown>): ResultContent | null => {
+const tavilyContent = (
+  item: Record<string, unknown>,
+  options: ContentOptions | null,
+): ResultContent | null => {
   const rawContent = firstString(item.raw_content);
-  return rawContent ? { markdown: rawContent } : null;
+  if (!rawContent) {
+    return null;
+  }
+
+  return options?.markdown === false
+    ? { text: rawContent }
+    : { markdown: rawContent };
 };
 
 const tavilyAnswer = (raw: unknown): Answer | null => {
