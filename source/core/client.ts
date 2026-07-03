@@ -11,6 +11,7 @@ import type {
   SearchClientOptions,
   SearchRequestOptions,
   SearchResponse,
+  StrategyOptions,
   Warning,
 } from "../types/index.js";
 import {
@@ -18,9 +19,26 @@ import {
   EnginesConfigSchema,
   QueryInputSchema,
 } from "../types/index.js";
-import { executeWithRetries, unsupportedFailure } from "./http.js";
+import { DispatchGate } from "./gate.js";
+import {
+  executeWithRetries,
+  networkError,
+  unsupportedFailure,
+} from "./http.js";
 import { AsyncQueue } from "./stream.js";
 import { addWarning, makeMetadata, mergeHooks, safeHook } from "./utils.js";
+
+const defaultHedgeDelayMs = 500;
+
+interface SelectedEngine {
+  adapter: EngineAdapter;
+  config: EngineConfig;
+}
+
+type RunEngineFn = (
+  entry: SelectedEngine,
+  signal: AbortSignal | undefined,
+) => Promise<EngineResult>;
 
 export const defineEngine = <C extends EngineConfig>(
   adapter: EngineAdapter<C>,
@@ -53,31 +71,59 @@ export const createSearchClient = (
       return { adapter, config: parsedConfig };
     });
 
+  const gate = new DispatchGate({
+    ...(options.budget ? { budget: options.budget } : {}),
+    ...(options.respectRateLimits === undefined
+      ? {}
+      : { respectRateLimits: options.respectRateLimits }),
+  });
+
   return {
     search: async (query, requestOptions) => {
       const parsedQuery = QueryInputSchema.parse(query);
-      const entries = await Promise.all(
-        selected.map(async ({ adapter, config }) => [
-          adapter.id,
-          await runEngine({
-            adapter,
-            config,
-            query: parsedQuery,
-            clientOptions: options,
-            requestOptions,
-          }),
-        ]),
-      );
+      const strategy = resolveStrategy(options, requestOptions);
+      const signal = withDeadline(requestOptions?.signal, strategy.deadlineMs);
+      const ordered = orderSelected(selected, strategy.order);
+      const run: RunEngineFn = (entry, runSignal) =>
+        runEngine({
+          adapter: entry.adapter,
+          config: entry.config,
+          query: parsedQuery,
+          clientOptions: options,
+          requestOptions: { ...requestOptions, signal: runSignal },
+          gate,
+        });
 
-      return Object.fromEntries(entries) as SearchResponse;
+      switch (strategy.strategy) {
+        case "fallback":
+          return searchFallback(ordered, run, signal);
+        case "race":
+          return searchRace(ordered, run, signal, 0);
+        case "hedged":
+          return searchRace(ordered, run, signal, strategy.hedgeDelayMs);
+        default: {
+          const entries = await Promise.all(
+            ordered.map(async (entry) => [
+              entry.adapter.id,
+              await run(entry, signal),
+            ]),
+          );
+          return Object.fromEntries(entries) as SearchResponse;
+        }
+      }
     },
     searchStream: (query, requestOptions) => {
       const parsedQuery = QueryInputSchema.parse(query);
+      const strategy = resolveStrategy(options, requestOptions);
       return streamEngines({
-        selected,
+        selected: orderSelected(selected, strategy.order),
         query: parsedQuery,
         clientOptions: options,
-        requestOptions,
+        requestOptions: {
+          ...requestOptions,
+          signal: withDeadline(requestOptions?.signal, strategy.deadlineMs),
+        },
+        gate,
       });
     },
   };
@@ -107,74 +153,243 @@ export const searchStream = (
   });
 };
 
+const resolveStrategy = (
+  clientOptions: SearchClientOptions,
+  requestOptions: SearchRequestOptions | undefined,
+): {
+  strategy: NonNullable<StrategyOptions["strategy"]>;
+  hedgeDelayMs: number;
+  order?: string[];
+  deadlineMs?: number;
+} => {
+  const order = requestOptions?.order ?? clientOptions.order;
+  const deadlineMs = requestOptions?.deadlineMs ?? clientOptions.deadlineMs;
+  return {
+    strategy: requestOptions?.strategy ?? clientOptions.strategy ?? "all",
+    hedgeDelayMs:
+      requestOptions?.hedgeDelayMs ??
+      clientOptions.hedgeDelayMs ??
+      defaultHedgeDelayMs,
+    ...(order ? { order } : {}),
+    ...(deadlineMs === undefined ? {} : { deadlineMs }),
+  };
+};
+
+const withDeadline = (
+  signal: AbortSignal | undefined,
+  deadlineMs: number | undefined,
+): AbortSignal | undefined => {
+  if (deadlineMs === undefined) {
+    return signal;
+  }
+
+  const timeout = AbortSignal.timeout(deadlineMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+};
+
+const orderSelected = (
+  selected: SelectedEngine[],
+  order: string[] | undefined,
+): SelectedEngine[] => {
+  if (!order || order.length === 0) {
+    return selected;
+  }
+
+  const byId = new Map(selected.map((entry) => [entry.adapter.id, entry]));
+  const prioritized = order.flatMap((id) => {
+    const entry = byId.get(id);
+    return entry ? [entry] : [];
+  });
+  const rest = selected.filter((entry) => !order.includes(entry.adapter.id));
+  return [...prioritized, ...rest];
+};
+
+/** Try engines one at a time, stopping at the first success. */
+const searchFallback = async (
+  engines: SelectedEngine[],
+  run: RunEngineFn,
+  signal: AbortSignal | undefined,
+): Promise<SearchResponse> => {
+  const results: Record<string, EngineResult> = {};
+  for (const entry of engines) {
+    const result = await run(entry, signal);
+    results[entry.adapter.id] = result;
+    if (result.ok) {
+      break;
+    }
+  }
+
+  return results;
+};
+
+/**
+ * Start engines (staggered by staggerMs when > 0); the first success aborts
+ * everything still in flight. Engines never started are omitted from the
+ * response; aborted engines settle as failures and are included.
+ */
+const searchRace = async (
+  engines: SelectedEngine[],
+  run: RunEngineFn,
+  callerSignal: AbortSignal | undefined,
+  staggerMs: number,
+): Promise<SearchResponse> => {
+  const controller = new AbortController();
+  const combined = callerSignal
+    ? AbortSignal.any([callerSignal, controller.signal])
+    : controller.signal;
+  const results: Record<string, EngineResult> = {};
+  const settlements: Promise<void>[] = [];
+  let won = false;
+
+  const launch = (entry: SelectedEngine) =>
+    run(entry, combined).then((result) => {
+      results[entry.adapter.id] = result;
+      if (result.ok && !won) {
+        won = true;
+        controller.abort(new Error("Another engine already succeeded"));
+      }
+    });
+
+  for (const [index, entry] of engines.entries()) {
+    if (index > 0 && staggerMs > 0) {
+      await sleepUntilAbort(staggerMs, combined);
+    }
+    if (won || combined.aborted) {
+      break;
+    }
+    settlements.push(launch(entry));
+  }
+
+  await Promise.all(settlements);
+  return results;
+};
+
+/** Resolves after ms, or immediately once the signal aborts. */
+const sleepUntilAbort = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
 const runEngine = async (input: {
   adapter: EngineAdapter;
   config: EngineConfig;
   query: QueryInput;
   clientOptions: SearchClientOptions;
   requestOptions?: SearchRequestOptions;
+  gate?: DispatchGate;
 }): Promise<EngineResult> => {
   const warnings = collectUnsupportedWarnings(
     input.adapter,
     input.query,
     input.config,
   );
+  const hooks = mergedHooks(input);
 
   if (warnings.length > 0 && input.config.onUnsupportedParam === "error") {
-    const result = unsupportedFailure(input.adapter.id, warnings);
-    const hooks = mergedHooks(input);
-    safeHook(hooks, "onError", {
+    return settleFailure(unsupportedFailure(input.adapter.id, warnings), hooks);
+  }
+
+  const denial = input.gate?.denial(input.adapter.id);
+  if (denial && input.gate) {
+    return settleFailure(
+      input.gate.failure(input.adapter.id, denial, warnings),
+      hooks,
+    );
+  }
+
+  let release: (() => void) | undefined;
+  // Only await the gate when a throttle is configured: the extra microtask
+  // tick would otherwise delay request start past synchronous caller aborts.
+  if (input.gate && input.config.throttle) {
+    try {
+      release = await input.gate.acquire(
+        input.adapter.id,
+        input.config,
+        input.requestOptions?.signal,
+      );
+    } catch (cause) {
+      return settleFailure(
+        input.gate.failure(
+          input.adapter.id,
+          networkError("network", "Request aborted", cause, false),
+          warnings,
+        ),
+        hooks,
+      );
+    }
+  }
+
+  try {
+    const fetchImpl = resolveFetch(input.config, input.clientOptions.fetch);
+    const request = input.adapter.buildRequest(
+      input.query,
+      input.config,
+      warnings,
+    );
+
+    const result = await executeWithRetries({
       engine: input.adapter.id,
-      error: result.error,
+      request,
+      config: input.config,
+      fetch: fetchImpl,
+      hooks,
+      signal: input.requestOptions?.signal,
+      warnings,
+      parse: (response, latencyMs, rateLimit) =>
+        input.adapter.parseResponse(response, {
+          engine: input.adapter.id,
+          query: input.query,
+          config: input.config,
+          latencyMs,
+          httpStatus: response.status,
+          rateLimit,
+          warnings,
+          includeRaw: input.config.includeRaw ?? false,
+        }),
     });
+
+    input.gate?.record(input.adapter.id, input.config, result);
+    if (!result.ok) {
+      safeHook(hooks, "onError", {
+        engine: input.adapter.id,
+        error: result.error,
+      });
+    }
     safeHook(hooks, "onSettled", { engine: input.adapter.id, result });
     return result;
+  } finally {
+    release?.();
   }
+};
 
-  const fetchImpl = resolveFetch(input.config, input.clientOptions.fetch);
-  const hooks = mergedHooks(input);
-  const request = input.adapter.buildRequest(
-    input.query,
-    input.config,
-    warnings,
-  );
-
-  const result = await executeWithRetries({
-    engine: input.adapter.id,
-    request,
-    config: input.config,
-    fetch: fetchImpl,
-    hooks,
-    signal: input.requestOptions?.signal,
-    warnings,
-    parse: (response, latencyMs, rateLimit) =>
-      input.adapter.parseResponse(response, {
-        engine: input.adapter.id,
-        query: input.query,
-        config: input.config,
-        latencyMs,
-        httpStatus: response.status,
-        rateLimit,
-        warnings,
-        includeRaw: input.config.includeRaw ?? false,
-      }),
-  });
-
-  if (!result.ok) {
-    safeHook(hooks, "onError", {
-      engine: input.adapter.id,
-      error: result.error,
-    });
-  }
-  safeHook(hooks, "onSettled", { engine: input.adapter.id, result });
+const settleFailure = (
+  result: EngineResult & { ok: false },
+  hooks: ReturnType<typeof mergeHooks>,
+): EngineResult => {
+  safeHook(hooks, "onError", { engine: result.engine, error: result.error });
+  safeHook(hooks, "onSettled", { engine: result.engine, result });
   return result;
 };
 
 const streamEngines = (input: {
-  selected: { adapter: EngineAdapter; config: EngineConfig }[];
+  selected: SelectedEngine[];
   query: QueryInput;
   clientOptions: SearchClientOptions;
   requestOptions?: SearchRequestOptions;
+  gate?: DispatchGate;
 }): AsyncIterable<EngineStreamEvent> => {
   const controller = new AbortController();
   const callerSignal = input.requestOptions?.signal;
@@ -249,6 +464,7 @@ const streamEngines = (input: {
             ...input.requestOptions,
             signal: controller.signal,
           },
+          ...(input.gate ? { gate: input.gate } : {}),
         });
         emitTerminalEvents(queue, adapter.id, result);
       } catch (cause) {

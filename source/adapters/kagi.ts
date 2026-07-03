@@ -6,15 +6,18 @@ import {
   makeResult,
   makeSuccess,
   mergeParams,
+  normalizeDate,
+  numberOrNull,
+  queryParams,
   singleQuery,
 } from "../core/utils.js";
 import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
 
-const endpoint = "https://api.ceramic.ai/search";
+const endpoint = "https://kagi.com/api/v0/search";
 
-export const ceramicAdapter: EngineAdapter<KeyedEngineConfig> = {
-  id: "ceramic",
+export const kagiAdapter: EngineAdapter<KeyedEngineConfig> = {
+  id: "kagi",
   configSchema: KeyedEngineConfigSchema,
   capabilities: {
     answer: false,
@@ -22,7 +25,7 @@ export const ceramicAdapter: EngineAdapter<KeyedEngineConfig> = {
     streaming: false,
     multiQuery: false,
     params: {
-      count: false,
+      count: true,
       dateRange: false,
       freshness: false,
       includeDomains: false,
@@ -31,37 +34,50 @@ export const ceramicAdapter: EngineAdapter<KeyedEngineConfig> = {
       language: false,
       safeSearch: false,
     },
-    verticals: ["web"],
+    verticals: ["web", "news"],
   },
-  buildRequest(input, config) {
-    const body = mergeParams(
-      "ceramic",
-      config,
-      { query: singleQuery(input.query) },
-      input.overrides,
-    );
+  buildRequest(input, config, warnings) {
+    const mapped = {
+      q: singleQuery(input.query),
+      limit: input.count,
+    };
 
     return {
-      method: "POST",
+      method: "GET",
       url: config.baseUrl ?? endpoint,
-      headers: { Authorization: `Bearer ${config.apiKey}` },
-      body,
+      headers: { Authorization: `Bot ${config.apiKey}` },
+      query: queryParams(
+        "kagi",
+        mergeParams("kagi", config, mapped, input.overrides),
+        warnings,
+      ),
     };
   },
   parseResponse(response, ctx) {
     const raw = response.raw;
-    const rawResults = extractResults(raw);
+    const rawResults = isObject(raw)
+      ? // t === 0 marks search results; t === 1 is a related-searches block.
+        asArray(raw.data)
+          .filter(isObject)
+          .filter((item) => item.t === 0)
+      : [];
     const results = rawResults
       .map((item) =>
         makeResult({
           url: firstString(item.url) ?? "",
           title: firstString(item.title),
-          snippet: firstString(item.description, item.snippet),
+          snippet: firstString(item.snippet),
+          publishedDate: normalizeDate(item.published),
+          score: numberOrNull(item.rank),
+          image: isObject(item.thumbnail)
+            ? firstString(item.thumbnail.url)
+            : null,
           raw: item,
         }),
       )
       .filter((result) => result.url.length > 0);
 
+    const meta = isObject(raw) && isObject(raw.meta) ? raw.meta : {};
     return makeSuccess({
       engine: ctx.engine,
       results,
@@ -69,7 +85,7 @@ export const ceramicAdapter: EngineAdapter<KeyedEngineConfig> = {
         engine: ctx.engine,
         latencyMs: ctx.latencyMs,
         httpStatus: ctx.httpStatus,
-        requestId: requestId(raw),
+        requestId: firstString(meta.id),
         totalResults: results.length,
         rateLimit: ctx.rateLimit,
         warnings: ctx.warnings,
@@ -80,20 +96,4 @@ export const ceramicAdapter: EngineAdapter<KeyedEngineConfig> = {
       includeRaw: ctx.includeRaw,
     });
   },
-};
-
-const extractResults = (raw: unknown): Record<string, unknown>[] => {
-  if (!isObject(raw)) {
-    return [];
-  }
-
-  return asArray(raw.results ?? raw.data).filter(isObject);
-};
-
-const requestId = (raw: unknown): string | null => {
-  if (!isObject(raw) || !isObject(raw.searchMetadata)) {
-    return null;
-  }
-
-  return firstString(raw.searchMetadata.requestId, raw.searchMetadata.id);
 };

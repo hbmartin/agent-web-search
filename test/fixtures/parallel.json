@@ -1,0 +1,19 @@
+{
+  "search_id": "sr_0123456789",
+  "results": [
+    {
+      "url": "https://example.com/espresso",
+      "title": "Best espresso machines",
+      "excerpts": ["A roundup of espresso machines.", "Second excerpt."],
+      "publish_date": "2026-01-20"
+    },
+    {
+      "url": "https://coffee.example.org/guide",
+      "title": "Espresso machine guide",
+      "excerpts": ["How to pick a machine."]
+    }
+  ],
+  "usage": {
+    "requests": 1
+  }
+}

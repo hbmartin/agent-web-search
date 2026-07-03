@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "data": {
+    "web": [
+      {
+        "url": "https://example.com/espresso",
+        "title": "Best espresso machines",
+        "description": "A roundup of espresso machines.",
+        "markdown": "# Best espresso machines\nA roundup."
+      },
+      {
+        "url": "https://coffee.example.org/guide",
+        "title": "Espresso machine guide",
+        "description": "How to pick a machine."
+      }
+    ],
+    "news": []
+  }
+}

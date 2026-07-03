@@ -18,15 +18,16 @@ import {
 import type {
   ContentOptions,
   EngineAdapter,
+  KeyedEngineConfig,
   ResultContent,
 } from "../types/index.js";
-import { EngineConfigSchema } from "../types/index.js";
+import { KeyedEngineConfigSchema } from "../types/index.js";
 
 const endpoint = "https://api.exa.ai/search";
 
-export const exaAdapter: EngineAdapter = {
+export const exaAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "exa",
-  configSchema: EngineConfigSchema,
+  configSchema: KeyedEngineConfigSchema,
   capabilities: {
     answer: false,
     content: true,

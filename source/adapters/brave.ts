@@ -14,14 +14,15 @@ import {
   queryParams,
   singleQuery,
 } from "../core/utils.js";
-import type { EngineAdapter } from "../types/index.js";
-import { EngineConfigSchema } from "../types/index.js";
+import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
+import { KeyedEngineConfigSchema } from "../types/index.js";
+import { withDomainOperators } from "./shared.js";
 
 const endpoint = "https://api.search.brave.com/res/v1/web/search";
 
-export const braveAdapter: EngineAdapter = {
+export const braveAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "brave",
-  configSchema: EngineConfigSchema,
+  configSchema: KeyedEngineConfigSchema,
   capabilities: {
     answer: false,
     content: false,
@@ -117,22 +118,6 @@ export const braveAdapter: EngineAdapter = {
       includeRaw: ctx.includeRaw,
     });
   },
-};
-
-const withDomainOperators = (
-  query: string,
-  includeDomains: string[] | undefined,
-  excludeDomains: string[] | undefined,
-): string => {
-  const include =
-    includeDomains && includeDomains.length > 0
-      ? ` (${includeDomains.map((domain) => `site:${domain}`).join(" OR ")})`
-      : "";
-  const exclude =
-    excludeDomains && excludeDomains.length > 0
-      ? ` ${excludeDomains.map((domain) => `-site:${domain}`).join(" ")}`
-      : "";
-  return `${query}${include}${exclude}`;
 };
 
 const extractWebResults = (raw: unknown): Record<string, unknown>[] => {

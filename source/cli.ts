@@ -5,24 +5,49 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import {
+  aggregate,
   builtInEngineIds,
   createSearchClient,
   type EngineConfig,
   type EngineId,
   type EnginesConfig,
   type FetchLike,
+  formatForLLM,
   type QueryInput,
   QueryInputSchema,
+  type SearchStrategy,
+  searchStrategies,
 } from "./index.js";
+import { runMcpServer } from "./mcp/server.js";
 
-const envNames: Record<EngineId, string> = {
-  brave: "BRAVE_API_KEY",
-  ceramic: "CERAMIC_API_KEY",
-  exa: "EXA_API_KEY",
-  parallel: "PARALLEL_API_KEY",
-  firecrawl: "FIRECRAWL_API_KEY",
-  sonar: "PERPLEXITY_API_KEY",
-  you: "YOU_API_KEY",
+interface EngineEnvSource {
+  apiKeyVar?: string;
+  baseUrlVar?: string;
+  requiresKey: boolean;
+  // Keyless engines join only when named with --engine, so a bare CLI call
+  // doesn't silently query them alongside every configured engine.
+  explicitOnly?: boolean;
+}
+
+const engineEnvSources: Record<EngineId, EngineEnvSource> = {
+  brave: { apiKeyVar: "BRAVE_API_KEY", requiresKey: true },
+  ceramic: { apiKeyVar: "CERAMIC_API_KEY", requiresKey: true },
+  duckduckgo: { requiresKey: false, explicitOnly: true },
+  exa: { apiKeyVar: "EXA_API_KEY", requiresKey: true },
+  firecrawl: { apiKeyVar: "FIRECRAWL_API_KEY", requiresKey: true },
+  jina: { apiKeyVar: "JINA_API_KEY", requiresKey: true },
+  kagi: { apiKeyVar: "KAGI_API_KEY", requiresKey: true },
+  parallel: { apiKeyVar: "PARALLEL_API_KEY", requiresKey: true },
+  searxng: {
+    apiKeyVar: "SEARXNG_API_KEY",
+    baseUrlVar: "SEARXNG_BASE_URL",
+    requiresKey: false,
+  },
+  serpapi: { apiKeyVar: "SERPAPI_API_KEY", requiresKey: true },
+  serper: { apiKeyVar: "SERPER_API_KEY", requiresKey: true },
+  sonar: { apiKeyVar: "PERPLEXITY_API_KEY", requiresKey: true },
+  tavily: { apiKeyVar: "TAVILY_API_KEY", requiresKey: true },
+  you: { apiKeyVar: "YOU_API_KEY", requiresKey: true },
 };
 
 export interface CliStreams {
@@ -55,6 +80,10 @@ export const main = async (
       raw: { type: "boolean" },
       stream: { type: "boolean" },
       ndjson: { type: "boolean" },
+      format: { type: "string" },
+      aggregate: { type: "boolean" },
+      strategy: { type: "string" },
+      "deadline-ms": { type: "string" },
     },
   });
 
@@ -65,6 +94,25 @@ export const main = async (
 
   if (parsed.values.version) {
     streams.stdout.write(`${packageVersion()}\n`);
+    return 0;
+  }
+
+  if (parsed.positionals[0] === "mcp") {
+    const mcpEngines = buildEngines(
+      normalizeEngines(parsed.values.engine),
+      env,
+      false,
+      (parsed.values.engine ?? []).length > 0,
+    );
+    if (Object.keys(mcpEngines).length === 0) {
+      streams.stderr.write(
+        "No engines configured. Pass --engine and set matching API key env vars.\n",
+      );
+      return 1;
+    }
+
+    const mcpClient = createSearchClient(mcpEngines, { fetch: fetchImpl });
+    await runMcpServer(mcpClient, { serverVersion: packageVersion() });
     return 0;
   }
 
@@ -82,11 +130,35 @@ export const main = async (
     return 1;
   }
 
+  const format =
+    parsed.values.format ?? (parsed.values.ndjson ? "ndjson" : "json");
+  if (!isOutputFormat(format)) {
+    streams.stderr.write(
+      "Invalid --format. Pass json, ndjson, markdown, or xml.\n",
+    );
+    return 1;
+  }
+
+  const { strategy } = parsed.values;
+  if (strategy !== undefined && !isStrategy(strategy)) {
+    streams.stderr.write(
+      "Invalid --strategy. Pass all, race, fallback, or hedged.\n",
+    );
+    return 1;
+  }
+
+  const deadlineMs = parseCount(parsed.values["deadline-ms"]);
+  if (parsed.values["deadline-ms"] !== undefined && deadlineMs === undefined) {
+    streams.stderr.write("Invalid --deadline-ms. Pass a positive integer.\n");
+    return 1;
+  }
+
   const selectedEngines = normalizeEngines(parsed.values.engine);
   const engines = buildEngines(
     selectedEngines,
     env,
     Boolean(parsed.values.raw),
+    (parsed.values.engine ?? []).length > 0,
   );
   if (Object.keys(engines).length === 0) {
     streams.stderr.write(
@@ -127,21 +199,44 @@ export const main = async (
   }
 
   const client = createSearchClient(engines, { fetch: fetchImpl });
+  const requestOptions = {
+    ...(strategy === undefined ? {} : { strategy }),
+    ...(deadlineMs === undefined ? {} : { deadlineMs }),
+  };
   if (parsed.values.stream) {
-    for await (const event of client.searchStream(parsedQuery.data)) {
+    for await (const event of client.searchStream(
+      parsedQuery.data,
+      requestOptions,
+    )) {
       streams.stdout.write(`${JSON.stringify(event)}\n`);
     }
     return 0;
   }
 
-  const response = await client.search(parsedQuery.data);
+  const response = await client.search(parsedQuery.data, requestOptions);
+  if (format === "markdown" || format === "xml") {
+    streams.stdout.write(`${formatForLLM(response, { format })}\n`);
+    return 0;
+  }
+
+  const payload = parsed.values.aggregate ? aggregate(response) : response;
   streams.stdout.write(
-    parsed.values.ndjson
-      ? `${JSON.stringify(response)}\n`
-      : `${JSON.stringify(response, null, 2)}\n`,
+    format === "ndjson"
+      ? `${JSON.stringify(payload)}\n`
+      : `${JSON.stringify(payload, null, 2)}\n`,
   );
   return 0;
 };
+
+const outputFormats = ["json", "ndjson", "markdown", "xml"] as const;
+
+const isOutputFormat = (
+  value: string,
+): value is (typeof outputFormats)[number] =>
+  (outputFormats as readonly string[]).includes(value);
+
+const isStrategy = (value: string): value is SearchStrategy =>
+  (searchStrategies as readonly string[]).includes(value);
 
 const normalizeEngines = (values: string[] | undefined): EngineId[] => {
   const requested = values ? splitValues(values) : [];
@@ -155,11 +250,34 @@ const buildEngines = (
   selected: EngineId[],
   env: NodeJS.ProcessEnv,
   includeRaw: boolean,
+  explicitSelection: boolean,
 ): EnginesConfig =>
   Object.fromEntries(
     selected.flatMap((engine): [EngineId, EngineConfig][] => {
-      const apiKey = env[envNames[engine]];
-      return apiKey ? [[engine, { apiKey, includeRaw }]] : [];
+      const source = engineEnvSources[engine];
+      if (source.explicitOnly && !explicitSelection) {
+        return [];
+      }
+
+      const apiKey = source.apiKeyVar ? env[source.apiKeyVar] : undefined;
+      const baseUrl = source.baseUrlVar ? env[source.baseUrlVar] : undefined;
+      if (source.requiresKey && !apiKey) {
+        return [];
+      }
+      if (source.baseUrlVar && !baseUrl) {
+        return [];
+      }
+
+      return [
+        [
+          engine,
+          {
+            includeRaw,
+            ...(apiKey ? { apiKey } : {}),
+            ...(baseUrl ? { baseUrl } : {}),
+          },
+        ],
+      ];
     }),
   ) as EnginesConfig;
 
@@ -244,6 +362,7 @@ const errorMessage = (cause: unknown): string =>
 
 const helpText = (): string => `Usage
   agent-web-search --query "search terms" --engine brave --engine exa
+  agent-web-search mcp [--engine <id>]     Run as an MCP stdio server.
 
 Options
   -q, --query <text>            Search query. Positional text is also accepted.
@@ -258,13 +377,21 @@ Options
       --content <fields>        true or comma list: markdown,html,text,summary.
       --raw                     Include top-level raw provider payloads.
       --stream                  Emit stream events as NDJSON.
-      --ndjson                  Emit one-line JSON for non-streaming output.
+      --format <name>           json (default), ndjson, markdown, or xml.
+      --ndjson                  Shorthand for --format ndjson.
+      --aggregate               Merge engines into one deduplicated,
+                                rank-fused list (json/ndjson output).
+      --strategy <name>         all (default), race, fallback, or hedged.
+      --deadline-ms <number>    Overall deadline across engines and retries.
   -h, --help                    Show help.
   -v, --version                 Show version.
 
 API key env vars
-  BRAVE_API_KEY, CERAMIC_API_KEY, EXA_API_KEY, PARALLEL_API_KEY,
-  FIRECRAWL_API_KEY, PERPLEXITY_API_KEY, YOU_API_KEY
+  BRAVE_API_KEY, CERAMIC_API_KEY, EXA_API_KEY, FIRECRAWL_API_KEY,
+  JINA_API_KEY, KAGI_API_KEY, PARALLEL_API_KEY, PERPLEXITY_API_KEY,
+  SERPAPI_API_KEY, SERPER_API_KEY, TAVILY_API_KEY, YOU_API_KEY.
+  searxng uses SEARXNG_BASE_URL (and optional SEARXNG_API_KEY);
+  duckduckgo needs no key but joins only when named with --engine.
 `;
 
 const isMain =

@@ -406,6 +406,24 @@ const isSensitiveHeader = (name: string): boolean =>
     "x-subscription-token",
   ].includes(name.toLowerCase());
 
+// Retry-After may be delay-seconds or an HTTP-date (RFC 9110 §10.2.3).
+export const parseRetryAfterMs = (
+  value: string | null,
+  now = Date.now(),
+): number | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed) * 1000;
+  }
+
+  const dateMs = new Date(trimmed).getTime();
+  return Number.isNaN(dateMs) ? undefined : Math.max(0, dateMs - now);
+};
+
 const delayForRetry = async (input: {
   attempt: number;
   error: SearchEngineError;
@@ -420,18 +438,23 @@ const delayForRetry = async (input: {
   engine: string;
   signal?: AbortSignal;
 }): Promise<void> => {
-  const retryAfter = input.response?.headers.get("retry-after");
-  const retryAfterMs = retryAfter ? Number(retryAfter) * 1000 : undefined;
+  const retryAfterMs = parseRetryAfterMs(
+    input.response?.headers.get("retry-after") ?? null,
+  );
   const exponential =
     input.retryPolicy.initialDelayMs *
     input.retryPolicy.factor ** input.attempt;
   const capped = Math.min(input.retryPolicy.maxDelayMs, exponential);
+  // Equal jitter keeps a floor of half the backoff so delays never collapse
+  // to ~0; Retry-After is honored but capped so a hostile or misconfigured
+  // server cannot stall an attempt indefinitely.
+  const jittered = input.retryPolicy.jitter
+    ? Math.floor(capped / 2 + Math.random() * (capped / 2))
+    : capped;
   const delayMs =
-    retryAfterMs && Number.isFinite(retryAfterMs)
-      ? retryAfterMs
-      : input.retryPolicy.jitter
-        ? Math.floor(Math.random() * capped)
-        : capped;
+    retryAfterMs === undefined
+      ? jittered
+      : Math.min(input.retryPolicy.maxDelayMs, retryAfterMs);
 
   safeHook(input.hooks, "onRetry", {
     engine: input.engine,

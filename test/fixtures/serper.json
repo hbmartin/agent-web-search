@@ -1,0 +1,26 @@
+{
+  "searchParameters": {
+    "q": "best espresso machines",
+    "type": "search"
+  },
+  "organic": [
+    {
+      "position": 1,
+      "title": "Best espresso machines",
+      "link": "https://example.com/espresso",
+      "snippet": "A roundup of espresso machines.",
+      "date": "2026-01-05"
+    },
+    {
+      "position": 2,
+      "title": "Espresso machine guide",
+      "link": "https://coffee.example.org/guide",
+      "snippet": "How to pick a machine."
+    }
+  ],
+  "answerBox": {
+    "answer": "Nine bars of pressure.",
+    "title": "Espresso pressure",
+    "link": "https://coffee.example.org/pressure"
+  }
+}
