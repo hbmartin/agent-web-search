@@ -1,0 +1,25 @@
+{
+  "web": {
+    "totalCount": 128,
+    "results": [
+      {
+        "url": "https://example.com/espresso",
+        "title": "Best espresso machines",
+        "description": "A roundup of the best espresso machines this year.",
+        "extra_snippets": ["Snippet one", "Snippet two"],
+        "page_age": "2026-01-15T08:00:00",
+        "thumbnail": {
+          "src": "https://imgs.example.com/thumb.jpg"
+        },
+        "meta_url": {
+          "favicon": "https://example.com/favicon.ico"
+        }
+      },
+      {
+        "url": "https://coffee.example.org/guide",
+        "title": "Espresso machine guide",
+        "description": "How to pick a machine."
+      }
+    ]
+  }
+}

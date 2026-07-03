@@ -1,0 +1,28 @@
+{
+  "requestId": "exa_0123456789",
+  "results": [
+    {
+      "id": "https://example.com/espresso",
+      "url": "https://example.com/espresso",
+      "title": "Best espresso machines",
+      "summary": "A roundup of espresso machines.",
+      "highlights": ["Highlight one"],
+      "publishedDate": "2026-01-10T00:00:00.000Z",
+      "author": "Jane Doe",
+      "score": 0.92,
+      "text": "Full page text about espresso machines.",
+      "image": "https://imgs.example.com/thumb.jpg",
+      "favicon": "https://example.com/favicon.ico"
+    },
+    {
+      "id": "https://coffee.example.org/guide",
+      "url": "https://coffee.example.org/guide",
+      "title": "Espresso machine guide",
+      "highlights": [],
+      "score": 0.81
+    }
+  ],
+  "costDollars": {
+    "total": 0.005
+  }
+}

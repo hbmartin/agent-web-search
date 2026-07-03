@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "url": "https://example.com/espresso",
+      "title": "Best espresso machines",
+      "description": "A roundup of espresso machines."
+    },
+    {
+      "url": "https://coffee.example.org/guide",
+      "title": "Espresso machine guide",
+      "snippet": "How to pick a machine."
+    }
+  ],
+  "searchMetadata": {
+    "requestId": "cer_0123456789"
+  }
+}

@@ -8,14 +8,14 @@ import {
   mergeParams,
   singleQuery,
 } from "../core/utils.js";
-import type { EngineAdapter } from "../types/index.js";
-import { EngineConfigSchema } from "../types/index.js";
+import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
+import { KeyedEngineConfigSchema } from "../types/index.js";
 
 const endpoint = "https://api.ceramic.ai/search";
 
-export const ceramicAdapter: EngineAdapter = {
+export const ceramicAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "ceramic",
-  configSchema: EngineConfigSchema,
+  configSchema: KeyedEngineConfigSchema,
   capabilities: {
     answer: false,
     content: false,

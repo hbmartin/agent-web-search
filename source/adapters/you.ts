@@ -18,16 +18,17 @@ import {
 import type {
   ContentOptions,
   EngineAdapter,
+  KeyedEngineConfig,
   ResultContent,
   Warning,
 } from "../types/index.js";
-import { EngineConfigSchema } from "../types/index.js";
+import { KeyedEngineConfigSchema } from "../types/index.js";
 
 const endpoint = "https://ydc-index.io/v1/search";
 
-export const youAdapter: EngineAdapter = {
+export const youAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "you",
-  configSchema: EngineConfigSchema,
+  configSchema: KeyedEngineConfigSchema,
   capabilities: {
     answer: false,
     content: true,

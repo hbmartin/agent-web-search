@@ -1,0 +1,19 @@
+{
+  "code": 200,
+  "status": 20000,
+  "data": [
+    {
+      "title": "Best espresso machines",
+      "url": "https://example.com/espresso",
+      "description": "A roundup of espresso machines.",
+      "content": "# Best espresso machines\nA roundup.",
+      "date": "2026-02-01T00:00:00Z"
+    },
+    {
+      "title": "Espresso machine guide",
+      "url": "https://coffee.example.org/guide",
+      "description": "How to pick a machine.",
+      "content": ""
+    }
+  ]
+}

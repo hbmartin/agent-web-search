@@ -11,14 +11,14 @@ import {
   normalizeDate,
   queryArray,
 } from "../core/utils.js";
-import type { EngineAdapter } from "../types/index.js";
-import { EngineConfigSchema } from "../types/index.js";
+import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
+import { KeyedEngineConfigSchema } from "../types/index.js";
 
 const endpoint = "https://api.parallel.ai/v1/search";
 
-export const parallelAdapter: EngineAdapter = {
+export const parallelAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "parallel",
-  configSchema: EngineConfigSchema,
+  configSchema: KeyedEngineConfigSchema,
   capabilities: {
     answer: false,
     content: false,

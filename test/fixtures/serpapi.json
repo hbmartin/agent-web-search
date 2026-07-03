@@ -1,0 +1,27 @@
+{
+  "search_metadata": {
+    "id": "serpapi_0123456789",
+    "status": "Success"
+  },
+  "search_information": {
+    "total_results": 1000000
+  },
+  "organic_results": [
+    {
+      "position": 1,
+      "title": "Best espresso machines",
+      "link": "https://example.com/espresso",
+      "snippet": "A roundup of espresso machines.",
+      "snippet_highlighted_words": ["espresso"],
+      "date": "Jan 10, 2026",
+      "favicon": "https://example.com/favicon.ico",
+      "thumbnail": "https://imgs.example.com/thumb.jpg"
+    },
+    {
+      "position": 2,
+      "title": "Espresso machine guide",
+      "link": "https://coffee.example.org/guide",
+      "snippet": "How to pick a machine."
+    }
+  ]
+}

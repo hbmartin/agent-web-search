@@ -8,12 +8,9 @@
     "url": "git+https://github.com/hbmartin/agent-web-search.git"
   },
   "author": "Harold Martin <harold.martin@gmail.com>",
-  "dependencies": {
-    "zod": "^4.3.6"
-  },
   "description": "Client-first TypeScript search aggregation library for multiple web search providers.",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "exports": {
     ".": {
@@ -56,6 +53,16 @@
         "default": "./dist/cjs/adapters/ceramic.js"
       }
     },
+    "./adapters/duckduckgo": {
+      "import": {
+        "types": "./dist/esm/adapters/duckduckgo.d.ts",
+        "default": "./dist/esm/adapters/duckduckgo.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/duckduckgo.d.cts",
+        "default": "./dist/cjs/adapters/duckduckgo.js"
+      }
+    },
     "./adapters/exa": {
       "import": {
         "types": "./dist/esm/adapters/exa.d.ts",
@@ -76,6 +83,26 @@
         "default": "./dist/cjs/adapters/firecrawl.js"
       }
     },
+    "./adapters/jina": {
+      "import": {
+        "types": "./dist/esm/adapters/jina.d.ts",
+        "default": "./dist/esm/adapters/jina.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/jina.d.cts",
+        "default": "./dist/cjs/adapters/jina.js"
+      }
+    },
+    "./adapters/kagi": {
+      "import": {
+        "types": "./dist/esm/adapters/kagi.d.ts",
+        "default": "./dist/esm/adapters/kagi.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/kagi.d.cts",
+        "default": "./dist/cjs/adapters/kagi.js"
+      }
+    },
     "./adapters/parallel": {
       "import": {
         "types": "./dist/esm/adapters/parallel.d.ts",
@@ -84,6 +111,36 @@
       "require": {
         "types": "./dist/cjs/adapters/parallel.d.cts",
         "default": "./dist/cjs/adapters/parallel.js"
+      }
+    },
+    "./adapters/searxng": {
+      "import": {
+        "types": "./dist/esm/adapters/searxng.d.ts",
+        "default": "./dist/esm/adapters/searxng.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/searxng.d.cts",
+        "default": "./dist/cjs/adapters/searxng.js"
+      }
+    },
+    "./adapters/serpapi": {
+      "import": {
+        "types": "./dist/esm/adapters/serpapi.d.ts",
+        "default": "./dist/esm/adapters/serpapi.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/serpapi.d.cts",
+        "default": "./dist/cjs/adapters/serpapi.js"
+      }
+    },
+    "./adapters/serper": {
+      "import": {
+        "types": "./dist/esm/adapters/serper.d.ts",
+        "default": "./dist/esm/adapters/serper.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/serper.d.cts",
+        "default": "./dist/cjs/adapters/serper.js"
       }
     },
     "./adapters/sonar": {
@@ -96,6 +153,16 @@
         "default": "./dist/cjs/adapters/sonar.js"
       }
     },
+    "./adapters/tavily": {
+      "import": {
+        "types": "./dist/esm/adapters/tavily.d.ts",
+        "default": "./dist/esm/adapters/tavily.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/tavily.d.cts",
+        "default": "./dist/cjs/adapters/tavily.js"
+      }
+    },
     "./adapters/you": {
       "import": {
         "types": "./dist/esm/adapters/you.d.ts",
@@ -104,6 +171,22 @@
       "require": {
         "types": "./dist/cjs/adapters/you.d.cts",
         "default": "./dist/cjs/adapters/you.js"
+      }
+    },
+    "./mcp": {
+      "import": {
+        "types": "./dist/esm/mcp/server.d.ts",
+        "default": "./dist/esm/mcp/server.js"
+      }
+    },
+    "./tools": {
+      "import": {
+        "types": "./dist/esm/tools/index.d.ts",
+        "default": "./dist/esm/tools/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/tools/index.d.cts",
+        "default": "./dist/cjs/tools/index.js"
       }
     }
   },
@@ -129,17 +212,28 @@
     "format": "biome check --write",
     "lint": "biome check --error-on-warnings",
     "test": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:browser": "node scripts/check-browser.mjs",
+    "docs": "typedoc",
+    "changeset": "changeset"
   },
   "type": "module",
   "version": "0.1.0",
   "devDependencies": {
     "@biomejs/biome": "^2.3.15",
+    "@changesets/cli": "^2.31.0",
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^22",
     "@vitest/coverage-istanbul": "^4.0.18",
+    "esbuild": "^0.28.1",
+    "fast-check": "^4.8.0",
     "publint": "^0.3.17",
+    "typedoc": "^0.28.19",
     "typescript": "^6.0.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
   }
 }

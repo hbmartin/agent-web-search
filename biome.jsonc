@@ -425,6 +425,56 @@
           }
         }
       }
+    },
+    {
+      "includes": ["source/mcp/**/*.ts", "source/tools/**/*.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off",
+            "noExcessiveLinesPerFunction": "off"
+          },
+          "style": {
+            "useExportsLast": "off"
+          },
+          "suspicious": {
+            "useAwait": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["examples/**/*.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off",
+            "noProcessGlobal": "off",
+            "noUndeclaredDependencies": "off"
+          },
+          "style": {
+            "noProcessEnv": "off"
+          },
+          "suspicious": {
+            "noConsole": "off",
+            "noExplicitAny": "off"
+          },
+          "nursery": {
+            "noUndeclaredEnvVars": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["source/mcp/server.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noProcessGlobal": "off",
+            "noNodejsModules": "off"
+          }
+        }
+      }
     }
   ]
 }

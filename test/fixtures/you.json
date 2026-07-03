@@ -1,0 +1,29 @@
+{
+  "metadata": {
+    "search_uuid": "you_0123456789"
+  },
+  "results": {
+    "web": [
+      {
+        "url": "https://example.com/espresso",
+        "title": "Best espresso machines",
+        "description": "A roundup of espresso machines.",
+        "snippets": ["Snippet one", "Snippet two"],
+        "page_age": "2026-01-08T00:00:00Z",
+        "authors": ["Jane Doe"],
+        "contents": {
+          "markdown": "# Best espresso machines"
+        },
+        "thumbnail_url": "https://imgs.example.com/thumb.jpg",
+        "favicon_url": "https://example.com/favicon.ico"
+      },
+      {
+        "url": "https://coffee.example.org/guide",
+        "title": "Espresso machine guide",
+        "description": "How to pick a machine.",
+        "snippets": []
+      }
+    ],
+    "news": []
+  }
+}

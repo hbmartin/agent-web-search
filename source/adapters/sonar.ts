@@ -24,16 +24,17 @@ import type {
   EngineResult,
   EngineStreamEvent,
   HttpRequest,
+  KeyedEngineConfig,
   SearchResult,
   Warning,
 } from "../types/index.js";
-import { EngineConfigSchema } from "../types/index.js";
+import { KeyedEngineConfigSchema } from "../types/index.js";
 
 const endpoint = "https://api.perplexity.ai/v1/sonar";
 
-export const sonarAdapter: EngineAdapter = {
+export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "sonar",
-  configSchema: EngineConfigSchema,
+  configSchema: KeyedEngineConfigSchema,
   supportsStreaming: true,
   capabilities: {
     answer: true,

@@ -1,0 +1,31 @@
+{
+  "query": "best espresso machines",
+  "number_of_results": 240,
+  "results": [
+    {
+      "url": "https://example.com/espresso",
+      "title": "Best espresso machines",
+      "content": "A roundup of espresso machines.",
+      "publishedDate": "2026-01-12T00:00:00",
+      "engine": "google",
+      "score": 1.5
+    },
+    {
+      "url": "https://coffee.example.org/guide",
+      "title": "Espresso machine guide",
+      "content": "How to pick a machine.",
+      "engine": "duckduckgo",
+      "score": 0.9,
+      "thumbnail": "https://imgs.example.com/thumb.jpg"
+    }
+  ],
+  "answers": [
+    {
+      "answer": "Espresso is a concentrated coffee brewed under pressure.",
+      "url": "https://en.wikipedia.org/wiki/Espresso",
+      "engine": "wikipedia"
+    }
+  ],
+  "suggestions": ["espresso grinder"],
+  "infoboxes": []
+}

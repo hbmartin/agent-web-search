@@ -44,10 +44,17 @@ const DateOnlySchema = z
 export const builtInEngineIds = [
   "brave",
   "ceramic",
+  "duckduckgo",
   "exa",
-  "parallel",
   "firecrawl",
+  "jina",
+  "kagi",
+  "parallel",
+  "searxng",
+  "serpapi",
+  "serper",
   "sonar",
+  "tavily",
   "you",
 ] as const;
 
@@ -134,9 +141,19 @@ export interface TelemetryHooks {
   onSettled?(ctx: { engine: string; result: EngineResult }): void;
 }
 
+export const ThrottleSchema = z
+  .object({
+    maxConcurrent: z.number().int().positive().optional(),
+    minIntervalMs: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type Throttle = z.infer<typeof ThrottleSchema>;
+
+// apiKey is optional at the base level because some engines (duckduckgo,
+// searxng) are keyless; adapters that require a key use KeyedEngineConfigSchema.
 export const EngineConfigSchema = z
   .object({
-    apiKey: z.string().min(1),
+    apiKey: z.string().min(1).optional(),
     baseUrl: z.string().url().optional(),
     timeoutMs: z.number().int().positive().optional(),
     maxRetries: z.number().int().nonnegative().optional(),
@@ -146,9 +163,16 @@ export const EngineConfigSchema = z
     defaults: z.record(z.string(), z.unknown()).optional(),
     hooks: z.custom<TelemetryHooks>().optional(),
     fetch: z.custom<FetchLike>().optional(),
+    throttle: ThrottleSchema.optional(),
+    costPerRequestUsd: z.number().nonnegative().optional(),
   })
   .passthrough();
 export type EngineConfig = z.infer<typeof EngineConfigSchema>;
+
+export const KeyedEngineConfigSchema = EngineConfigSchema.extend({
+  apiKey: z.string().min(1),
+});
+export type KeyedEngineConfig = z.infer<typeof KeyedEngineConfigSchema>;
 
 export const EnginesConfigSchema = z.record(
   z.string(),
@@ -321,13 +345,54 @@ export interface SearchClient {
   ): AsyncIterable<EngineStreamEvent>;
 }
 
-export interface SearchClientOptions {
+export const searchStrategies = ["all", "race", "fallback", "hedged"] as const;
+export type SearchStrategy = (typeof searchStrategies)[number];
+
+export interface StrategyOptions {
+  /**
+   * How engines are dispatched:
+   * - "all" (default): query every engine in parallel, return every result.
+   * - "race": query every engine in parallel, first success wins and the
+   *   rest are aborted; already-settled failures are included.
+   * - "fallback": query engines sequentially in order, stopping at the
+   *   first success; engines never tried are omitted from the response.
+   * - "hedged": stagger engine starts by hedgeDelayMs; first success wins
+   *   and pending/unstarted engines are aborted/omitted.
+   */
+  strategy?: SearchStrategy;
+  /** Engine priority order for "fallback"/"hedged"; defaults to config order. */
+  order?: string[];
+  /** Delay between staggered starts for "hedged". Default 500ms. */
+  hedgeDelayMs?: number;
+  /** Overall deadline for the whole search across all engines and retries. */
+  deadlineMs?: number;
+}
+
+export interface CostBudget {
+  /**
+   * Hard ceiling on the cumulative estimated cost of searches made through
+   * one client. Once reached, engines fail fast with a "quota" error instead
+   * of issuing requests. Cost per request is taken from provider-reported
+   * usage when available, else from the engine's costPerRequestUsd config.
+   */
+  maxCostUsd: number;
+}
+
+export interface SearchClientOptions extends StrategyOptions {
   adapters?: EngineAdapter[];
   fetch?: FetchLike;
   hooks?: TelemetryHooks;
+  budget?: CostBudget;
+  /**
+   * When true, an engine whose last response reported zero remaining
+   * rate-limit quota fails fast with a "rate_limit" error until the
+   * provider-reported reset time passes, instead of sending a request
+   * that is likely to be rejected.
+   */
+  respectRateLimits?: boolean;
 }
 
-export interface SearchRequestOptions {
+export interface SearchRequestOptions extends StrategyOptions {
   signal?: AbortSignal;
   hooks?: TelemetryHooks;
 }

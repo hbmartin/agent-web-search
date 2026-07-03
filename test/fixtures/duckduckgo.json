@@ -1,0 +1,34 @@
+{
+  "Heading": "Espresso",
+  "AbstractText": "Espresso is a concentrated form of coffee brewed under pressure.",
+  "AbstractURL": "https://en.wikipedia.org/wiki/Espresso",
+  "AbstractSource": "Wikipedia",
+  "Answer": "",
+  "Results": [
+    {
+      "FirstURL": "https://example.com/espresso",
+      "Text": "Best espresso machines - A roundup of machines.",
+      "Icon": {
+        "URL": "/i/example.com.ico"
+      }
+    }
+  ],
+  "RelatedTopics": [
+    {
+      "FirstURL": "https://coffee.example.org/guide",
+      "Text": "Espresso machine guide - How to pick a machine.",
+      "Icon": {
+        "URL": ""
+      }
+    },
+    {
+      "Name": "Coffee drinks",
+      "Topics": [
+        {
+          "FirstURL": "https://en.wikipedia.org/wiki/Latte",
+          "Text": "Latte - A coffee drink made with espresso and steamed milk."
+        }
+      ]
+    }
+  ]
+}

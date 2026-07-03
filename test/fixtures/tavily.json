@@ -1,0 +1,22 @@
+{
+  "query": "best espresso machines",
+  "answer": "The best espresso machines balance pressure stability and temperature control.",
+  "request_id": "tvly_0123456789",
+  "response_time": 1.2,
+  "results": [
+    {
+      "title": "Best espresso machines",
+      "url": "https://example.com/espresso",
+      "content": "A roundup of espresso machines.",
+      "score": 0.98,
+      "published_date": "2026-01-11",
+      "raw_content": "# Best espresso machines\nA roundup."
+    },
+    {
+      "title": "Espresso machine guide",
+      "url": "https://coffee.example.org/guide",
+      "content": "How to pick a machine.",
+      "score": 0.83
+    }
+  ]
+}

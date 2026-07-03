@@ -1,0 +1,35 @@
+{
+  "id": "sonar_0123456789",
+  "model": "sonar",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "The best espresso machines this year include several strong options."
+      }
+    }
+  ],
+  "citations": [
+    "https://example.com/espresso",
+    "https://coffee.example.org/guide"
+  ],
+  "search_results": [
+    {
+      "url": "https://example.com/espresso",
+      "title": "Best espresso machines",
+      "date": "2026-01-15"
+    },
+    {
+      "url": "https://coffee.example.org/guide",
+      "title": "Espresso machine guide",
+      "date": "2026-01-02"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 48,
+    "total_tokens": 60
+  }
+}

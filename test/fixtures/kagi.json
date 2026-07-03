@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "id": "kagi_0123456789",
+    "node": "us-east",
+    "ms": 120
+  },
+  "data": [
+    {
+      "t": 0,
+      "rank": 1,
+      "url": "https://example.com/espresso",
+      "title": "Best espresso machines",
+      "snippet": "A roundup of espresso machines.",
+      "published": "2026-01-05T00:00:00Z",
+      "thumbnail": {
+        "url": "https://imgs.example.com/thumb.jpg"
+      }
+    },
+    {
+      "t": 0,
+      "rank": 2,
+      "url": "https://coffee.example.org/guide",
+      "title": "Espresso machine guide",
+      "snippet": "How to pick a machine."
+    },
+    {
+      "t": 1,
+      "list": ["espresso grinder", "espresso beans"]
+    }
+  ]
+}
