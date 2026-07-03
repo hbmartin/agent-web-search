@@ -183,9 +183,12 @@ const withDeadline = (
     return signal;
   }
 
-  const timeout = AbortSignal.timeout(deadlineMs);
+  const timeout = AbortSignal.timeout(normalizeDeadlineMs(deadlineMs));
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 };
+
+const normalizeDeadlineMs = (deadlineMs: number): number =>
+  Number.isFinite(deadlineMs) ? Math.max(0, Math.floor(deadlineMs)) : 0;
 
 const orderSelected = (
   selected: SelectedEngine[],
@@ -195,12 +198,15 @@ const orderSelected = (
     return selected;
   }
 
+  const orderedIds = [...new Set(order)];
   const byId = new Map(selected.map((entry) => [entry.adapter.id, entry]));
-  const prioritized = order.flatMap((id) => {
+  const prioritized = orderedIds.flatMap((id) => {
     const entry = byId.get(id);
     return entry ? [entry] : [];
   });
-  const rest = selected.filter((entry) => !order.includes(entry.adapter.id));
+  const rest = selected.filter(
+    (entry) => !orderedIds.includes(entry.adapter.id),
+  );
   return [...prioritized, ...rest];
 };
 
@@ -212,6 +218,9 @@ const searchFallback = async (
 ): Promise<SearchResponse> => {
   const results: Record<string, EngineResult> = {};
   for (const entry of engines) {
+    if (signal?.aborted) {
+      break;
+    }
     const result = await run(entry, signal);
     results[entry.adapter.id] = result;
     if (result.ok) {

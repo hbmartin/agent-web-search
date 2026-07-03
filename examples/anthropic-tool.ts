@@ -5,8 +5,18 @@
  */
 import { anthropicWebSearchTool, createSearchClient } from "agent-web-search";
 
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+if (!anthropicApiKey) {
+  throw new Error("Set ANTHROPIC_API_KEY to run this example.");
+}
+
+const braveApiKey = process.env.BRAVE_API_KEY;
+if (!braveApiKey) {
+  throw new Error("Set BRAVE_API_KEY to run this example.");
+}
+
 const client = createSearchClient({
-  brave: { apiKey: process.env.BRAVE_API_KEY ?? "" },
+  brave: { apiKey: braveApiKey },
 });
 const tool = anthropicWebSearchTool(client);
 
@@ -26,15 +36,26 @@ const request = {
   ],
 };
 
-const first = await fetch("https://api.anthropic.com/v1/messages", {
+const firstResponse = await fetch("https://api.anthropic.com/v1/messages", {
   method: "POST",
   headers: {
-    "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+    "x-api-key": anthropicApiKey,
     "anthropic-version": "2023-06-01",
     "content-type": "application/json",
   },
   body: JSON.stringify(request),
-}).then((response) => response.json());
+});
+
+if (!firstResponse.ok) {
+  const body = await firstResponse.text();
+  throw new Error(
+    `Anthropic request failed (${firstResponse.status}): ${body}`,
+  );
+}
+
+const first = (await firstResponse.json()) as {
+  content?: { type: string; input?: unknown }[];
+};
 
 const toolUse = first.content?.find(
   (block: { type: string }) => block.type === "tool_use",

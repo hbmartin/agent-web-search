@@ -194,6 +194,17 @@ describe("MCP server", () => {
     expect(
       await handler(request("notifications/initialized", undefined, null)),
     ).toBeNull();
+    expect(await handler(request("ping", undefined, null))).toBeNull();
+    expect(
+      (await handler(
+        JSON.stringify({ jsonrpc: "2.0", id: {}, method: "ping" }),
+      ))?.error?.code,
+    ).toBe(-32_600);
+    expect(
+      (await handler(
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: [] }),
+      ))?.error?.code,
+    ).toBe(-32_600);
     expect((await handler(request("ping")))?.result).toEqual({});
   });
 

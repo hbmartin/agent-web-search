@@ -134,7 +134,9 @@ const formatXml = (
       `rank="${entry.rank}"`,
       `url="${escapeXml(entry.url)}"`,
       `title="${escapeXml(entry.title)}"`,
-      ...(entry.publishedDate ? [`published="${entry.publishedDate}"`] : []),
+      ...(entry.publishedDate
+        ? [`published="${escapeXml(entry.publishedDate)}"`]
+        : []),
       ...(entry.engines.length > 0
         ? [`engines="${escapeXml(entry.engines.join(","))}"`]
         : []),
@@ -148,8 +150,22 @@ const formatXml = (
   return lines.join("\n");
 };
 
-const truncate = (value: string, maxChars: number): string =>
-  value.length > maxChars ? `${value.slice(0, maxChars - 1)}…` : value;
+const truncate = (value: string, maxChars: number): string => {
+  if (!Number.isFinite(maxChars)) {
+    return value;
+  }
+
+  const limit = Math.floor(maxChars);
+  if (limit <= 0) {
+    return "";
+  }
+
+  if (value.length <= limit) {
+    return value;
+  }
+
+  return limit === 1 ? "…" : `${value.slice(0, limit - 1)}…`;
+};
 
 const escapeXml = (value: string): string =>
   value

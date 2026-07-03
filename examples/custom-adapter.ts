@@ -7,13 +7,20 @@
 import {
   createSearchClient,
   defineEngine,
-  EngineConfigSchema,
+  KeyedEngineConfigSchema,
 } from "agent-web-search";
-import { z } from "zod";
+
+const safeHostname = (url: string): string | null => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url.length > 0 ? url : null;
+  }
+};
 
 const myAdapter = defineEngine({
   id: "my-engine",
-  configSchema: EngineConfigSchema.extend({ apiKey: z.string().min(1) }),
+  configSchema: KeyedEngineConfigSchema,
   capabilities: {
     answer: false,
     content: false,
@@ -52,7 +59,7 @@ const myAdapter = defineEngine({
         publishedDate: null,
         author: null,
         score: null,
-        source: new URL(hit.url).hostname,
+        source: safeHostname(hit.url),
         content: null,
         highlights: null,
         image: null,

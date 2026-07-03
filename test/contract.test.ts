@@ -208,4 +208,37 @@ describe("adapter contract fixtures", () => {
       });
     });
   }
+
+  it("maps Tavily text raw_content to content.text", () => {
+    const adapter = builtInAdapters.find((item) => item.id === "tavily");
+    expect(adapter).toBeDefined();
+    if (!adapter) {
+      return;
+    }
+
+    const result = adapter.parseResponse(
+      {
+        status: 200,
+        headers: new Headers(),
+        raw: loadFixture("tavily"),
+        text: JSON.stringify(loadFixture("tavily")),
+        url: "https://api.example.test/search",
+      },
+      {
+        engine: adapter.id,
+        query: { ...query, includeContent: { markdown: false } },
+        config: configFor(adapter),
+        latencyMs: 12,
+        httpStatus: 200,
+        rateLimit: null,
+        warnings: [],
+        includeRaw: false,
+      },
+    );
+    const parsed = EngineResultSchema.parse(result);
+
+    expect(parsed.ok && parsed.results.some((item) => item.content?.text)).toBe(
+      true,
+    );
+  });
 });

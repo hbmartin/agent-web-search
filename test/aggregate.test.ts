@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregate,
+  type AggregatedSearchResponse,
   type EngineResult,
   formatForLLM,
   normalizeUrlForDedupe,
@@ -63,6 +64,15 @@ describe("normalizeUrlForDedupe", () => {
     expect(normalizeUrlForDedupe("https://example.com/a?page=2")).not.toBe(
       normalizeUrlForDedupe("https://example.com/a?page=3"),
     );
+  });
+
+  it("re-encodes and sorts query parameters", () => {
+    expect(
+      normalizeUrlForDedupe("https://example.com/search?b=2&a=1"),
+    ).toBe(normalizeUrlForDedupe("https://example.com/search?a=1&b=2"));
+    expect(
+      normalizeUrlForDedupe("https://example.com/search?q=a%26b%3Dc"),
+    ).not.toBe(normalizeUrlForDedupe("https://example.com/search?q=a&b=c"));
   });
 
   it("falls back to trimmed lowercase for unparseable input", () => {
@@ -152,6 +162,21 @@ describe("aggregate", () => {
     expect(aggregated.results).toHaveLength(2);
     expect(aggregated.results[0]?.url).toBe("https://example.com/c");
   });
+
+  it("guards invalid RRF k values", () => {
+    const response: SearchResponse = {
+      alpha: success("alpha", [
+        result("https://example.com/a"),
+        result("https://example.com/b"),
+      ]),
+    };
+
+    const aggregated = aggregate(response, { k: Number.NEGATIVE_INFINITY });
+
+    expect(
+      aggregated.results.every((item) => Number.isFinite(item.fusedScore)),
+    ).toBe(true);
+  });
 });
 
 describe("formatForLLM", () => {
@@ -185,6 +210,28 @@ describe("formatForLLM", () => {
     expect(text).toContain('title="Result &lt;A&gt;"');
     expect(text).toContain("&quot;quotes&quot; &amp; ampersands");
     expect(text).not.toContain("<A>");
+  });
+
+  it("escapes XML published attributes", () => {
+    const aggregated: AggregatedSearchResponse = {
+      results: [
+        {
+          ...result("https://example.com/a", {
+            publishedDate: "2026&01-15",
+          }),
+          engines: ["alpha"],
+          engineRank: { alpha: 1 },
+          fusedScore: 1,
+        },
+      ],
+      answers: {},
+      succeeded: ["alpha"],
+      failed: {},
+    };
+
+    const text = formatForLLM(aggregated, { format: "xml" });
+
+    expect(text).toContain('published="2026&amp;01-15"');
   });
 
   it("surfaces engine failures instead of a bare empty list", () => {
@@ -237,5 +284,17 @@ describe("formatForLLM", () => {
     expect(text).toContain("3. **https://example.com/2**");
     expect(text).not.toContain("4. **");
     expect(text).toContain("…");
+  });
+
+  it("treats non-positive snippet caps as empty snippets", () => {
+    const capped: SearchResponse = {
+      alpha: success("alpha", [
+        result("https://example.com/a", { snippet: "abcdef" }),
+      ]),
+    };
+
+    const text = formatForLLM(capped, { maxSnippetChars: 0 });
+
+    expect(text).not.toContain("abcdef");
   });
 });
