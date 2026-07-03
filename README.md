@@ -1,38 +1,52 @@
 # agent-web-search
 
-Client-first TypeScript search aggregation library for multiple web search providers.
+Client-first TypeScript search aggregation library for multiple web search providers, built for AI agents.
 
-Query several web search APIs through a single, normalized interface. One call fans out to every configured engine in parallel, and you get back a consistent result shape per engine — including per-engine errors, warnings, rate-limit info, and optional raw payloads — without one slow or failing provider blocking the rest.
+Query several web search APIs through a single, normalized interface. One call fans out to every configured engine in parallel, and you get back a consistent result shape per engine — including per-engine errors, warnings, rate-limit info, and optional raw payloads — without one slow or failing provider blocking the rest. Then merge everything into one deduplicated, rank-fused list, format it for an LLM prompt, or expose the whole thing as an agent tool or MCP server.
 
 - **One shape for every provider** — `SearchResult`, `Answer`, and metadata are normalized across engines.
 - **Per-engine isolation** — each engine returns its own `ok: true | false` result; a failure in one never rejects the others.
+- **Cross-engine aggregation** — `aggregate()` dedupes by canonical URL and fuses rankings with reciprocal rank fusion.
+- **LLM-ready output** — `formatForLLM()` renders results as a compact markdown or XML block for prompts.
+- **Agent tools built in** — one-line tool definitions for the Anthropic API, OpenAI function calling, and the Vercel AI SDK, plus an MCP stdio server mode.
+- **Execution strategies** — fan out to all engines, race them, fall back in priority order, or hedge with staggered starts; with an overall deadline.
+- **Cost & rate-limit aware** — per-engine concurrency/pacing throttles, proactive backoff on exhausted provider rate limits, and a client-wide cost budget.
 - **Streaming** — consume results and answer deltas as they arrive via async iterables.
 - **Capability-aware** — unsupported query params are surfaced as warnings (or hard errors) instead of being silently dropped.
 - **Bring your own engines** — register custom adapters alongside the built-ins.
 - **Typed and validated** — runtime-validated with [Zod](https://zod.dev); ESM + CJS builds with full type declarations.
-- **Zero runtime deps beyond Zod**, and a CLI for quick searches from the terminal.
+- **Zero runtime deps beyond Zod (peer)**, browser-safe core, and a CLI for quick searches from the terminal.
 
 ## Supported engines
 
-| Engine      | id          | API key env var       |
-| ----------- | ----------- | --------------------- |
-| Brave       | `brave`     | `BRAVE_API_KEY`       |
-| Ceramic     | `ceramic`   | `CERAMIC_API_KEY`     |
-| Exa         | `exa`       | `EXA_API_KEY`         |
-| Parallel    | `parallel`  | `PARALLEL_API_KEY`    |
-| Firecrawl   | `firecrawl` | `FIRECRAWL_API_KEY`   |
-| Perplexity Sonar | `sonar` | `PERPLEXITY_API_KEY` |
-| You.com     | `you`       | `YOU_API_KEY`         |
+| Engine                 | id           | Credentials env var (CLI)                     |
+| ---------------------- | ------------ | --------------------------------------------- |
+| Brave                  | `brave`      | `BRAVE_API_KEY`                               |
+| Ceramic                | `ceramic`    | `CERAMIC_API_KEY`                             |
+| DuckDuckGo Instant Answers | `duckduckgo` | — (keyless)                              |
+| Exa                    | `exa`        | `EXA_API_KEY`                                 |
+| Firecrawl              | `firecrawl`  | `FIRECRAWL_API_KEY`                           |
+| Jina Search            | `jina`       | `JINA_API_KEY`                                |
+| Kagi                   | `kagi`       | `KAGI_API_KEY`                                |
+| Parallel               | `parallel`   | `PARALLEL_API_KEY`                            |
+| SearXNG (self-hosted)  | `searxng`    | `SEARXNG_BASE_URL` (+ optional `SEARXNG_API_KEY`) |
+| SerpAPI                | `serpapi`    | `SERPAPI_API_KEY`                             |
+| Serper.dev             | `serper`     | `SERPER_API_KEY`                              |
+| Perplexity Sonar       | `sonar`      | `PERPLEXITY_API_KEY`                          |
+| Tavily                 | `tavily`     | `TAVILY_API_KEY`                              |
+| You.com                | `you`        | `YOU_API_KEY`                                 |
+
+Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`).
 
 ## Installation
 
 ```sh
-npm install agent-web-search
+npm install agent-web-search zod
 # or
-pnpm add agent-web-search
+pnpm add agent-web-search zod
 ```
 
-Requires Node.js >= 18.
+`zod` (v4) is a peer dependency. Requires Node.js >= 22 for the CLI and Node builds; the library core also runs in browsers and edge runtimes (see [Browser & edge usage](#browser--edge-usage)).
 
 ## Quick start
 
@@ -78,7 +92,138 @@ const client = createSearchClient({
 const response = await client.search({ query: "what is a vector database" });
 ```
 
-`search()` and `searchStream()` are one-shot convenience wrappers that build a client per call. Prefer `createSearchClient` when you issue more than one search.
+`search()` and `searchStream()` are one-shot convenience wrappers that build a client per call. Prefer `createSearchClient` when you issue more than one search — the cost budget and rate-limit state also live on the client.
+
+### Aggregation: one deduplicated, rank-fused list
+
+`aggregate()` merges a multi-engine response into a single result list. URLs are canonicalized for deduplication (protocol, `www.`, fragments, trailing slashes, and tracking params like `utm_*`/`gclid`/`fbclid` are ignored) and ordered by [reciprocal rank fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf): each engine contributes `weight / (k + rank)`, so results that several engines agree on rise to the top.
+
+```ts
+import { aggregate } from "agent-web-search";
+
+const merged = aggregate(response, {
+  k: 60,                       // RRF smoothing constant (default 60)
+  weights: { exa: 2 },         // trust some engines more
+  maxResults: 10,
+});
+
+for (const result of merged.results) {
+  // result.engines — which engines returned it
+  // result.engineRank — its 1-based rank per engine
+  // result.fusedScore — the RRF score used for ordering
+  console.log(result.fusedScore.toFixed(4), result.engines, result.url);
+}
+
+merged.answers;   // Record<engine, Answer> from answer engines (sonar, tavily, …)
+merged.succeeded; // engines that returned ok
+merged.failed;    // Record<engine, SearchEngineError>
+```
+
+### LLM-ready formatting
+
+`formatForLLM()` turns a response (raw or pre-aggregated) into a compact, citation-friendly block to drop into a prompt.
+
+```ts
+import { formatForLLM } from "agent-web-search";
+
+const block = formatForLLM(response, {
+  format: "markdown",   // or "xml"
+  maxResults: 8,
+  maxSnippetChars: 400,
+});
+```
+
+Markdown output has an `## Answers` section (when engines produced answers) and a numbered `## Search results` list with title, date, URL, snippet, and source engines. XML output emits `<search_results>` with `<answer>` and `<result>` elements, fully escaped.
+
+### Agent tool definitions
+
+Ready-made web-search tools for the common LLM SDK wire formats — validation via Zod, execution via your configured client, output via `formatForLLM`.
+
+```ts
+import {
+  aiSdkWebSearchTool,
+  anthropicWebSearchTool,
+  createSearchClient,
+  openaiWebSearchTool,
+} from "agent-web-search";
+// or: import { ... } from "agent-web-search/tools";
+
+const client = createSearchClient({ brave: { apiKey: "..." } });
+
+// Anthropic API
+const tool = anthropicWebSearchTool(client);
+// tools: [{ name: tool.name, description: tool.description, input_schema: tool.input_schema }]
+// on tool_use: const text = await tool.execute(toolUse.input);
+
+// OpenAI function calling
+const { definition, execute } = openaiWebSearchTool(client);
+
+// Vercel AI SDK
+// tools: { web_search: aiSdkWebSearchTool(client) }
+```
+
+All variants accept `{ name, description, format }` options. The generic `createWebSearchTool(client)` exposes the Zod schema, the JSON schema, and `execute` for anything else.
+
+### MCP server mode
+
+Run the library as a zero-dependency [MCP](https://modelcontextprotocol.io) stdio server exposing a `web_search` tool:
+
+```sh
+TAVILY_API_KEY=... agent-web-search mcp
+# restrict engines:
+BRAVE_API_KEY=... agent-web-search mcp --engine brave
+```
+
+For Claude Code: `claude mcp add web-search -e TAVILY_API_KEY=... -- npx agent-web-search mcp`.
+
+Programmatic (Node-only) usage via the `agent-web-search/mcp` subpath:
+
+```ts
+import { runMcpServer } from "agent-web-search/mcp";
+await runMcpServer(client, { serverVersion: "1.0.0" });
+```
+
+### Execution strategies
+
+By default every configured engine is queried in parallel (`"all"`). Three more strategies are available per client or per request:
+
+```ts
+// First success wins; everything else is aborted.
+await client.search({ query }, { strategy: "race" });
+
+// Try engines sequentially in priority order, stop at the first success.
+await client.search({ query }, { strategy: "fallback", order: ["brave", "exa"] });
+
+// Start engines staggered by hedgeDelayMs; first success aborts the rest.
+await client.search({ query }, { strategy: "hedged", order: ["brave", "exa"], hedgeDelayMs: 300 });
+
+// Overall deadline across all engines and retries (any strategy).
+await client.search({ query }, { deadlineMs: 5000 });
+```
+
+With `"fallback"` and `"hedged"`, engines that were never started are omitted from the response; with `"race"`, aborted engines settle as failures and are included. `searchStream` always fans out to all engines but honors `deadlineMs` and `order`.
+
+### Throttling, rate limits, and cost budget
+
+```ts
+const client = createSearchClient(
+  {
+    brave: {
+      apiKey: "...",
+      throttle: { maxConcurrent: 2, minIntervalMs: 100 }, // client-side pacing
+      costPerRequestUsd: 0.005,                            // your cost estimate
+    },
+  },
+  {
+    respectRateLimits: true,        // fail fast while a provider reports remaining: 0
+    budget: { maxCostUsd: 1 },      // hard ceiling across all searches on this client
+  },
+);
+```
+
+- `throttle.maxConcurrent` caps in-flight requests per engine; `minIntervalMs` spaces request starts.
+- With `respectRateLimits: true`, an engine whose last response reported an exhausted rate limit fails fast with a `rate_limit` error until the provider-reported reset time, instead of burning a request.
+- The budget accrues provider-reported costs (`usage.costUsd`, e.g. Exa) or your `costPerRequestUsd` estimate; once reached, engines fail fast with a `quota` error.
 
 ### Streaming
 
@@ -97,101 +242,30 @@ for await (const event of stream) {
     case "answer_delta":
       process.stdout.write(event.text);
       break;
+    case "answer_done":
+      console.log("\ncitations:", event.answer.citations.length);
+      break;
     case "results":
-      console.log(`\n${event.engine}: ${event.results.length} results`);
+      console.log(`[${event.engine}] ${event.results.length} results`);
       break;
     case "metadata":
-      console.log(`${event.engine} metadata:`, event.metadata);
-      break;
-    case "answer_done":
-      // event.answer is the final Answer for this engine
-      break;
     case "error":
-      console.error(`${event.engine} error: ${event.error.message}`);
-      break;
     case "done":
-      // event.result is the full EngineResult for this engine
       break;
   }
 }
 ```
 
-Stream event types: `answer_delta`, `answer_done`, `results`, `metadata`, `error`, `done`.
-
-### Query options
-
-The query object is shared across all engines; each engine maps the parts it supports.
-
-```ts
-await client.search({
-  query: "climate policy",            // string, or string[] for multi-query engines
-  count: 10,                          // desired results per engine
-  freshness: "month",                 // "day" | "week" | "month" | "year"
-  dateRange: { start: "2026-01-01", end: "2026-06-01" },
-  includeDomains: ["nature.com"],
-  excludeDomains: ["example.com"],
-  country: "US",                      // ISO country code
-  language: "en",                     // ISO language code
-  safeSearch: "moderate",            // "off" | "moderate" | "strict"
-  includeContent: { markdown: true, summary: true }, // or `true`
-  overrides: { exa: { someRawParam: 1 } }, // per-engine raw param passthrough
-});
-```
-
-### Handling unsupported parameters
-
-Not every engine supports every parameter (see the [capability matrix](#capability-matrix)). When you pass a parameter an engine can't honor, the default behavior is to attach a `Warning` to that engine's metadata and continue. Control this per engine with `onUnsupportedParam`:
-
-```ts
-const client = createSearchClient({
-  ceramic: {
-    apiKey: process.env.CERAMIC_API_KEY!,
-    onUnsupportedParam: "error", // "warn" (default) | "ignore" | "error"
-  },
-});
-```
-
-- `"warn"` — record a warning in `metadata.warnings`, run the search anyway.
-- `"ignore"` — drop the parameter silently.
-- `"error"` — fail that engine with an `unsupported` error.
-
-### Per-engine configuration
-
-Every engine accepts the same configuration shape:
-
-```ts
-{
-  apiKey: string;              // required
-  baseUrl?: string;            // override the provider base URL
-  timeoutMs?: number;          // total network deadline per attempt (default 30000)
-  maxRetries?: number;         // default 2
-  retry?: {                    // exponential backoff policy
-    initialDelayMs?: number;   // default 250
-    maxDelayMs?: number;       // default 5000
-    factor?: number;           // default 2
-    jitter?: boolean;
-    retryStatuses?: number[];  // additional HTTP statuses to retry
-  };
-  includeRaw?: boolean;        // include the raw provider payload in results/metadata
-  onUnsupportedParam?: "warn" | "ignore" | "error";
-  defaults?: Record<string, unknown>; // engine-specific default params
-  hooks?: TelemetryHooks;      // per-engine telemetry
-  fetch?: typeof fetch;        // per-engine fetch override
-}
-```
-
-Retries apply to transient failures (network errors, timeouts, and `5xx`/`429` responses); auth and bad-request errors are not retried.
-
 ### Telemetry hooks
 
-Observe requests, responses, retries, and errors. Hooks can be set globally (client options), per request, or per engine — they are merged and all fire.
+Observe requests, responses, retries, errors, and settlements without affecting results. Hooks can be set per client, per request, or per engine.
 
 ```ts
 const client = createSearchClient(engines, {
   hooks: {
-    onRequest: ({ engine, url, attempt }) => log(`→ ${engine} #${attempt} ${url}`),
+    onRequest: ({ engine, url, attempt }) => log(`→ ${engine} ${url} (try ${attempt})`),
     onResponse: ({ engine, status, latencyMs }) => log(`← ${engine} ${status} ${latencyMs}ms`),
-    onRetry: ({ engine, attempt, delayMs }) => log(`↻ ${engine} retry in ${delayMs}ms`),
+    onRetry: ({ engine, delayMs }) => log(`↻ ${engine} retrying in ${delayMs}ms`),
     onError: ({ engine, error }) => log(`✗ ${engine} ${error.kind}`),
     onSettled: ({ engine, result }) => log(`✓ ${engine} ok=${result.ok}`),
   },
@@ -213,13 +287,12 @@ controller.abort();
 Implement an `EngineAdapter` and register it via `options.adapters`. `defineEngine` is an identity helper that preserves config types.
 
 ```ts
-import { createSearchClient, defineEngine } from "agent-web-search";
-import { z } from "zod";
+import { createSearchClient, defineEngine, KeyedEngineConfigSchema } from "agent-web-search";
 
 const myAdapter = defineEngine({
   id: "my-engine",
   capabilities: { /* ... */ },
-  configSchema: z.object({ apiKey: z.string() }).passthrough(),
+  configSchema: KeyedEngineConfigSchema,
   buildRequest(query, config, warnings) {
     return { method: "GET", url: "https://api.example.com/search", query: { q: query.query } };
   },
@@ -238,22 +311,31 @@ You can also import the built-in adapters individually:
 
 ```ts
 import { braveAdapter } from "agent-web-search/adapters/brave";
-import { exaAdapter, sonarAdapter } from "agent-web-search/adapters";
+import { exaAdapter, tavilyAdapter } from "agent-web-search/adapters";
 ```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-in adapter, and the [examples](./examples) directory for runnable samples.
 
 ## Capability matrix
 
-| Engine    | answer | content | streaming | multi-query | count | dateRange | freshness | includeDomains | excludeDomains | country | language | safeSearch | verticals                  |
-| --------- | :----: | :-----: | :-------: | :---------: | :---: | :-------: | :-------: | :------------: | :------------: | :-----: | :------: | :--------: | -------------------------- |
-| brave     |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web, news, images, video   |
-| ceramic   |   —    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
-| exa       |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news                  |
-| parallel  |   —    |    —    |     —     |      ✓      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web                        |
-| firecrawl |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news, images          |
-| sonar     |   ✓    |    —    |     ✓     |      —      |   —   |     ✓     |     ✓     |    native      |    emulated    |    —    |    ✓     |     —      | web                        |
-| you       |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    ✓     |     ✓      | web, news                  |
+| Engine     | answer | content | streaming | multi-query | count | dateRange | freshness | includeDomains | excludeDomains | country | language | safeSearch | verticals                  |
+| ---------- | :----: | :-----: | :-------: | :---------: | :---: | :-------: | :-------: | :------------: | :------------: | :-----: | :------: | :--------: | -------------------------- |
+| brave      |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web, news, images, video   |
+| ceramic    |   —    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
+| duckduckgo |   ✓    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
+| exa        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news                  |
+| firecrawl  |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news, images          |
+| jina       |   —    |    ✓    |     —     |      —      |   ✓   |     —     |     —     |   emulated     |    emulated    |    ✓    |    ✓     |     —      | web                        |
+| kagi       |   —    |    —    |     —     |      —      |   ✓   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web, news                  |
+| parallel   |   —    |    —    |     —     |      ✓      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web                        |
+| searxng    |   ✓    |    —    |     —     |      —      |   ✓   |     —     |     ✓     |   emulated     |    emulated    |    —    |    ✓     |     ✓      | web, news, images, video   |
+| serpapi    |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web, news                  |
+| serper     |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     —      | web, news                  |
+| sonar      |   ✓    |    —    |     ✓     |      —      |   —   |     ✓     |     ✓     |    native      |    emulated    |    —    |    ✓     |     —      | web                        |
+| tavily     |   ✓    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    —    |    —     |     —      | web, news                  |
+| you        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    ✓     |     ✓      | web, news                  |
 
-`native` = handled by the provider's API; `emulated` = approximated by the adapter (e.g. via query operators).
+`native` = handled by the provider's API; `emulated` = approximated by the adapter (e.g. via query operators). Serper and DuckDuckGo also surface opportunistic answers (Google answer box / instant answer) when the provider returns one, even where `answer` is not a guaranteed capability.
 
 ## CLI
 
@@ -261,9 +343,18 @@ The package ships an `agent-web-search` binary. Set the relevant API key env var
 
 ```sh
 agent-web-search --query "best espresso machines" --engine brave --engine exa --count 5
+
+# merged + LLM-ready markdown
+agent-web-search -q "fusion energy news" --format markdown
+
+# aggregated JSON, racing engines with a 5s deadline
+agent-web-search -q "vector databases" --aggregate --strategy race --deadline-ms 5000
+
+# MCP stdio server
+agent-web-search mcp
 ```
 
-By default it queries every engine that has a matching API key set in the environment.
+By default it queries every engine that has a matching API key set in the environment (`duckduckgo`, being keyless, joins only when named with `--engine`; `searxng` joins when `SEARXNG_BASE_URL` is set).
 
 ```text
 Options
@@ -279,7 +370,12 @@ Options
       --content <fields>        true or comma list: markdown,html,text,summary.
       --raw                     Include top-level raw provider payloads.
       --stream                  Emit stream events as NDJSON.
-      --ndjson                  Emit one-line JSON for non-streaming output.
+      --format <name>           json (default), ndjson, markdown, or xml.
+      --ndjson                  Shorthand for --format ndjson.
+      --aggregate               Merge engines into one deduplicated,
+                                rank-fused list (json/ndjson output).
+      --strategy <name>         all (default), race, fallback, or hedged.
+      --deadline-ms <number>    Overall deadline across engines and retries.
   -h, --help                    Show help.
   -v, --version                 Show version.
 ```
@@ -295,20 +391,28 @@ A successful engine result (`ok: true`) contains `results: SearchResult[]`, an o
 
 A failed engine result (`ok: false`) contains an `error` whose `kind` is one of: `auth`, `rate_limit`, `quota`, `bad_request`, `unsupported`, `timeout`, `network`, `upstream`, or `parse`, along with `metadata`.
 
-Both Zod schemas (`SearchResponseSchema`, `SearchResultSchema`, `AnswerSchema`, …) and TypeScript types are exported from the package root.
+Both Zod schemas (`SearchResponseSchema`, `SearchResultSchema`, `AnswerSchema`, …) and TypeScript types are exported from the package root. API documentation is generated with TypeDoc and published from the `docs` workflow.
+
+## Browser & edge usage
+
+Everything importable from the package root (client, adapters, aggregation, formatting, tools) is browser-safe: no Node builtins, `fetch`-based transport, works in browsers, Cloudflare Workers, Deno, and Bun. CI enforces this with an esbuild browser-platform bundle check (`pnpm check:browser`). The CLI and the `agent-web-search/mcp` subpath are Node-only.
+
+Caveat: most search providers do not send CORS headers and your API keys should not ship to untrusted clients — in real browser apps, proxy provider calls through your backend (`baseUrl` is configurable per engine, and you can pass a custom `fetch`).
 
 ## Development
 
 ```sh
 pnpm install
-pnpm build       # emit ESM + CJS builds to dist/
-pnpm test        # run the vitest suite with coverage
-pnpm typecheck   # tsc --noEmit
-pnpm lint        # biome check
-pnpm format      # biome check --write
+pnpm build          # emit ESM + CJS builds to dist/
+pnpm test           # run the vitest suite with coverage
+pnpm typecheck      # tsc --noEmit
+pnpm lint           # biome check
+pnpm format         # biome check --write
+pnpm check:browser  # browser-platform bundle smoke test
+pnpm docs           # generate TypeDoc API docs
 ```
 
-This repo uses [pnpm](https://pnpm.io) (pinned to `pnpm@11.5.2`), [Vitest](https://vitest.dev) for tests, and [Biome](https://biomejs.dev) for linting and formatting.
+Requires Node.js >= 22. This repo uses [pnpm](https://pnpm.io) (pinned via `packageManager`), [Vitest](https://vitest.dev) for tests (including per-adapter contract fixtures in `test/fixtures/`, property-based tests with fast-check, and an env-gated live suite), and [Biome](https://biomejs.dev) for linting and formatting. Releases are automated with [changesets](https://github.com/changesets/changesets) and published to npm with provenance. A scheduled `live` workflow runs the real-API integration tests weekly to catch provider drift.
 
 ## License
 
