@@ -202,6 +202,11 @@ describe("MCP server", () => {
     ).toBe(-32_600);
     expect(
       (await handler(
+        JSON.stringify({ jsonrpc: "2.0", id: null, method: "ping" }),
+      ))?.error?.code,
+    ).toBe(-32_600);
+    expect(
+      (await handler(
         JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: [] }),
       ))?.error?.code,
     ).toBe(-32_600);

@@ -294,7 +294,25 @@ describe("formatForLLM", () => {
     };
 
     const text = formatForLLM(capped, { maxSnippetChars: 0 });
+    const negativeInfinity = formatForLLM(capped, {
+      maxSnippetChars: Number.NEGATIVE_INFINITY,
+    });
 
     expect(text).not.toContain("abcdef");
+    expect(negativeInfinity).not.toContain("abcdef");
+  });
+
+  it("allows unbounded snippets with positive infinity caps", () => {
+    const capped: SearchResponse = {
+      alpha: success("alpha", [
+        result("https://example.com/a", { snippet: "abcdef" }),
+      ]),
+    };
+
+    const text = formatForLLM(capped, {
+      maxSnippetChars: Number.POSITIVE_INFINITY,
+    });
+
+    expect(text).toContain("abcdef");
   });
 });
