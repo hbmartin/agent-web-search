@@ -152,7 +152,7 @@ const formatXml = (
 
 const truncate = (value: string, maxChars: number): string => {
   if (!Number.isFinite(maxChars)) {
-    return value;
+    return maxChars > 0 ? value : "";
   }
 
   const limit = Math.floor(maxChars);

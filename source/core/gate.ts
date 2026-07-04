@@ -179,6 +179,11 @@ const waitForSlot = (
   signal?: AbortSignal,
 ): Promise<void> =>
   new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
+
     const onReady = () => {
       cleanup();
       resolve();
@@ -196,10 +201,6 @@ const waitForSlot = (
     };
 
     state.waiters.push(onReady);
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 

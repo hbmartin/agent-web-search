@@ -12,7 +12,7 @@ const invalidParamsCode = -32_602;
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
-  id?: number | string | null;
+  id?: number | string;
   method: string;
   params?: Record<string, unknown>;
 }
@@ -156,7 +156,6 @@ const isRequest = (message: unknown): message is JsonRpcRequest =>
 
 const isRequestId = (id: unknown): id is JsonRpcRequest["id"] =>
   id === undefined ||
-  id === null ||
   typeof id === "string" ||
   typeof id === "number";
 

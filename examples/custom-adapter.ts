@@ -14,7 +14,7 @@ const safeHostname = (url: string): string | null => {
   try {
     return new URL(url).hostname;
   } catch {
-    return url.length > 0 ? url : null;
+    return null;
   }
 };
 

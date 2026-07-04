@@ -198,14 +198,14 @@ const orderSelected = (
     return selected;
   }
 
-  const orderedIds = [...new Set(order)];
+  const orderedSet = new Set(order);
   const byId = new Map(selected.map((entry) => [entry.adapter.id, entry]));
-  const prioritized = orderedIds.flatMap((id) => {
+  const prioritized = [...orderedSet].flatMap((id) => {
     const entry = byId.get(id);
     return entry ? [entry] : [];
   });
   const rest = selected.filter(
-    (entry) => !orderedIds.includes(entry.adapter.id),
+    (entry) => !orderedSet.has(entry.adapter.id),
   );
   return [...prioritized, ...rest];
 };

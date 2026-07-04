@@ -220,18 +220,18 @@
   "type": "module",
   "version": "0.1.0",
   "devDependencies": {
-    "@biomejs/biome": "^2.3.15",
+    "@biomejs/biome": "^2.5.2",
     "@changesets/cli": "^2.31.0",
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^22",
-    "@vitest/coverage-istanbul": "^4.0.18",
+    "@vitest/coverage-istanbul": "^4.1.9",
     "esbuild": "^0.28.1",
     "fast-check": "^4.8.0",
     "publint": "^0.3.17",
     "typedoc": "^0.28.19",
     "typescript": "^6.0.3",
-    "vitest": "^4.0.18",
-    "zod": "^4.3.6"
+    "vitest": "^4.1.9",
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "zod": "^4.0.0"

@@ -237,8 +237,10 @@ describe("adapter contract fixtures", () => {
     );
     const parsed = EngineResultSchema.parse(result);
 
-    expect(parsed.ok && parsed.results.some((item) => item.content?.text)).toBe(
-      true,
-    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      throw new Error(`Expected ${adapter.id} fixture to parse successfully`);
+    }
+    expect(parsed.results.some((item) => item.content?.text)).toBe(true);
   });
 });
