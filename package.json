@@ -218,7 +218,7 @@
     "changeset": "changeset"
   },
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
     "@changesets/cli": "^2.31.0",
