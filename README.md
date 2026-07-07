@@ -26,6 +26,7 @@ Query several web search APIs through a single, normalized interface. One call f
 | DuckDuckGo Instant Answers | `duckduckgo` | — (keyless)                              |
 | Exa                    | `exa`        | `EXA_API_KEY`                                 |
 | Firecrawl              | `firecrawl`  | `FIRECRAWL_API_KEY`                           |
+| Google Programmable Search | `google` | `GOOGLE_PSE_API_KEY` + `GOOGLE_PSE_CX`        |
 | Jina Search            | `jina`       | `JINA_API_KEY`                                |
 | Kagi                   | `kagi`       | `KAGI_API_KEY`                                |
 | Parallel               | `parallel`   | `PARALLEL_API_KEY`                            |
@@ -36,7 +37,7 @@ Query several web search APIs through a single, normalized interface. One call f
 | Tavily                 | `tavily`     | `TAVILY_API_KEY`                              |
 | You.com                | `you`        | `YOU_API_KEY`                                 |
 
-Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`).
+Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`). `google` uses the [Custom Search JSON API](https://developers.google.com/custom-search/v1/overview) and needs both an API key and a Programmable Search Engine id (`cx`) from [programmablesearchengine.google.com](https://programmablesearchengine.google.com); results are capped at 10 per request. Bing is not supported: Microsoft retired the Bing Web Search API in August 2025.
 
 ## Installation
 
@@ -325,6 +326,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-i
 | duckduckgo |   ✓    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
 | exa        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news                  |
 | firecrawl  |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news, images          |
+| google     |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web                        |
 | jina       |   —    |    ✓    |     —     |      —      |   ✓   |     —     |     —     |   emulated     |    emulated    |    ✓    |    ✓     |     —      | web                        |
 | kagi       |   —    |    —    |     —     |      —      |   ✓   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web, news                  |
 | parallel   |   —    |    —    |     —     |      ✓      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web                        |

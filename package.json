@@ -83,6 +83,16 @@
         "default": "./dist/cjs/adapters/firecrawl.js"
       }
     },
+    "./adapters/google": {
+      "import": {
+        "types": "./dist/esm/adapters/google.d.ts",
+        "default": "./dist/esm/adapters/google.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/google.d.cts",
+        "default": "./dist/cjs/adapters/google.js"
+      }
+    },
     "./adapters/jina": {
       "import": {
         "types": "./dist/esm/adapters/jina.d.ts",

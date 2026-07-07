@@ -1,0 +1,55 @@
+{
+  "kind": "customsearch#search",
+  "queries": {
+    "request": [
+      {
+        "totalResults": "128",
+        "searchTerms": "best espresso machines",
+        "count": 2,
+        "cx": "test-cx"
+      }
+    ]
+  },
+  "searchInformation": {
+    "searchTime": 0.31,
+    "formattedSearchTime": "0.31",
+    "totalResults": "128",
+    "formattedTotalResults": "128"
+  },
+  "items": [
+    {
+      "kind": "customsearch#result",
+      "title": "Best espresso machines",
+      "htmlTitle": "<b>Best espresso machines</b>",
+      "link": "https://example.com/espresso",
+      "displayLink": "example.com",
+      "snippet": "A roundup of the best espresso machines this year.",
+      "htmlSnippet": "A roundup of the <b>best espresso machines</b> this year.",
+      "formattedUrl": "https://example.com/espresso",
+      "pagemap": {
+        "cse_thumbnail": [
+          {
+            "src": "https://imgs.example.com/thumb.jpg",
+            "width": "310",
+            "height": "163"
+          }
+        ],
+        "metatags": [
+          {
+            "og:title": "Best espresso machines"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "customsearch#result",
+      "title": "Espresso machine guide",
+      "htmlTitle": "Espresso machine guide",
+      "link": "https://coffee.example.org/guide",
+      "displayLink": "coffee.example.org",
+      "snippet": "How to pick a machine.",
+      "htmlSnippet": "How to pick a machine.",
+      "formattedUrl": "https://coffee.example.org/guide"
+    }
+  ]
+}

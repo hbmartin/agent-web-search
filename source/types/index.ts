@@ -47,6 +47,7 @@ export const builtInEngineIds = [
   "duckduckgo",
   "exa",
   "firecrawl",
+  "google",
   "jina",
   "kagi",
   "parallel",

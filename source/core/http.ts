@@ -403,6 +403,7 @@ const isSensitiveHeader = (name: string): boolean =>
     "proxy-authorization",
     "set-cookie",
     "x-api-key",
+    "x-goog-api-key",
     "x-subscription-token",
   ].includes(name.toLowerCase());
 

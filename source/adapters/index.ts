@@ -4,6 +4,7 @@ import { ceramicAdapter } from "./ceramic.js";
 import { duckduckgoAdapter } from "./duckduckgo.js";
 import { exaAdapter } from "./exa.js";
 import { firecrawlAdapter } from "./firecrawl.js";
+import { googleAdapter } from "./google.js";
 import { jinaAdapter } from "./jina.js";
 import { kagiAdapter } from "./kagi.js";
 import { parallelAdapter } from "./parallel.js";
@@ -19,6 +20,11 @@ export { ceramicAdapter } from "./ceramic.js";
 export { duckduckgoAdapter } from "./duckduckgo.js";
 export { exaAdapter } from "./exa.js";
 export { firecrawlAdapter } from "./firecrawl.js";
+export {
+  type GoogleConfig,
+  GoogleConfigSchema,
+  googleAdapter,
+} from "./google.js";
 export { jinaAdapter } from "./jina.js";
 export { kagiAdapter } from "./kagi.js";
 export { parallelAdapter } from "./parallel.js";
@@ -39,6 +45,7 @@ export const builtInAdapters: EngineAdapter[] = [
   duckduckgoAdapter,
   exaAdapter,
   firecrawlAdapter,
+  googleAdapter as EngineAdapter,
   jinaAdapter,
   kagiAdapter,
   parallelAdapter,
