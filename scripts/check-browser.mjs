@@ -9,6 +9,7 @@ const entryPoints = [
   "source/index.ts",
   "source/adapters/index.ts",
   "source/tools/index.ts",
+  "source/otel/index.ts",
 ];
 
 try {
@@ -20,9 +21,9 @@ try {
     write: false,
     outdir: "out",
     logLevel: "silent",
-    // zod is a peer dependency and browser-safe; keep it external so this
-    // check measures our code, not zod's.
-    external: ["zod"],
+    // zod and @opentelemetry/api are peer dependencies and browser-safe;
+    // keep them external so this check measures our code, not theirs.
+    external: ["zod", "@opentelemetry/api"],
   });
 
   for (const file of result.outputFiles) {

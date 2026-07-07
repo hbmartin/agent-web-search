@@ -15,7 +15,8 @@ Query several web search APIs through a single, normalized interface. One call f
 - **Capability-aware** — unsupported query params are surfaced as warnings (or hard errors) instead of being silently dropped.
 - **Bring your own engines** — register custom adapters alongside the built-ins.
 - **Typed and validated** — runtime-validated with [Zod](https://zod.dev); ESM + CJS builds with full type declarations.
-- **Zero runtime deps beyond Zod (peer)**, browser-safe core, and a CLI for quick searches from the terminal.
+- **First-class OpenTelemetry** — an optional `agent-web-search/otel` entry maps the hooks to OTel spans and metrics (latency histograms, per-engine error counters, cost counters).
+- **Zero runtime deps beyond Zod (peer)**, browser-safe core, and a CLI for quick searches from the terminal. `@opentelemetry/api` is an optional peer used only by the OTel entry point.
 
 ## Supported engines
 
@@ -300,6 +301,34 @@ const client = createSearchClient(engines, {
   },
 });
 ```
+
+### OpenTelemetry
+
+`agent-web-search/otel` maps the telemetry hooks to OpenTelemetry spans and metrics. It needs only [`@opentelemetry/api`](https://www.npmjs.com/package/@opentelemetry/api) (an optional peer dependency) — wire up whatever SDK/exporter you already run; with no SDK registered, the API's no-op implementations make the hooks free.
+
+```sh
+npm install @opentelemetry/api
+```
+
+```ts
+import { createSearchClient } from "agent-web-search";
+import { createOtelHooks } from "agent-web-search/otel";
+
+const client = createSearchClient(engines, { hooks: createOtelHooks() });
+```
+
+| Instrument                          | Type      | Attributes                                      |
+| ----------------------------------- | --------- | ----------------------------------------------- |
+| `agent_web_search.requests`         | counter   | `search.engine`                                 |
+| `agent_web_search.attempt.duration` | histogram (ms) | `search.engine`, `http.response.status_code` |
+| `agent_web_search.retries`          | counter   | `search.engine`, `error.kind`                   |
+| `agent_web_search.errors`           | counter   | `search.engine`, `error.kind`                   |
+| `agent_web_search.call.duration`    | histogram (ms) | `search.engine`, `ok`                        |
+| `agent_web_search.cost`             | counter (usd) | `search.engine`                              |
+
+Each settled engine call also produces a `CLIENT` span named `web_search <engine>`, backdated over the call's measured latency, with `search.engine`, `http.response.status_code`, and `search.results.count` (success) or `error.kind` + error status (failure). Because spans are constructed at settlement, they are not active while the request runs, so no trace context is propagated into provider HTTP calls.
+
+`createOtelHooks` accepts `tracer`/`meter` overrides, `spans: false` / `metrics: false` to disable either side, and a `costPerRequestUsd` map to count estimated spend for engines that don't report `usage.costUsd`. The returned object is ordinary `TelemetryHooks`, so it composes with your own hooks at client, request, or engine scope.
 
 ### Cancellation
 
