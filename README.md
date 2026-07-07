@@ -202,7 +202,22 @@ await client.search({ query }, { strategy: "hedged", order: ["brave", "exa"], he
 await client.search({ query }, { deadlineMs: 5000 });
 ```
 
-With `"fallback"` and `"hedged"`, engines that were never started are omitted from the response; with `"race"`, aborted engines settle as failures and are included. `searchStream` always fans out to all engines but honors `deadlineMs` and `order`.
+| Strategy     | Launch behavior                                   | Stops when                    | In the response                                                            |
+| ------------ | ------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------- |
+| `"all"`      | Every engine at once                              | All engines settle            | Every engine, successes and failures                                        |
+| `"race"`     | Every engine at once                              | First success aborts the rest | Every engine — aborted engines are included as failures                     |
+| `"fallback"` | One engine at a time, in order                    | First success                 | Engines tried so far; engines never tried are omitted                       |
+| `"hedged"`   | One engine every `hedgeDelayMs` (default 500)     | First success aborts the rest | Launched engines (aborted ones as failures); never-launched ones are omitted |
+
+Details that matter in production:
+
+- **Ordering.** `order` applies to every strategy (and to `searchStream`): duplicates are deduped, unknown ids are ignored, and engines you don't name still run — appended after the ordered ones in config order. Under `"race"`, an aborted engine's failure carries the abort reason `"Another engine already succeeded"`.
+- **Failures advance `"fallback"`.** Any failure — including instant gate denials such as `quota`, `rate_limit`, or `circuit_open` — moves `"fallback"` to the next engine. The same instant denials are what let `"hedged"` skip a known-bad engine without waiting out its hedge delay.
+- **`deadlineMs` is one outer clock.** It is applied once (via `AbortSignal.timeout`) across all engines and all retries; per-engine `timeoutMs` and retry backoff run inside it. Expiry aborts in-flight requests and backoff sleeps, wakes `"hedged"` stagger sleeps, and stops further engines from launching. Launched engines settle as failures included in the response; never-launched engines are omitted. The hedge timer is interrupted by the deadline, never recomputed against the remaining time — so a `hedgeDelayMs` longer than the remaining deadline simply means no more engines launch.
+- **Settled means settled.** `search()` resolves only after every launched engine has actually settled (aborts included), so resources are not left dangling after a win or deadline.
+- **Consensus.** There is no separate quorum strategy: for consensus-style behavior, use `"all"` and feed the response to [`aggregate()`](#aggregation-one-deduplicated-rank-fused-list) — reciprocal rank fusion already boosts results that multiple engines agree on.
+
+`searchStream` always fans out to all engines but honors `deadlineMs` and `order`.
 
 ### Throttling, rate limits, and cost budget
 

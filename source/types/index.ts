@@ -355,11 +355,13 @@ export interface StrategyOptions {
    * How engines are dispatched:
    * - "all" (default): query every engine in parallel, return every result.
    * - "race": query every engine in parallel, first success wins and the
-   *   rest are aborted; already-settled failures are included.
+   *   rest are aborted; aborted engines are included as failures.
    * - "fallback": query engines sequentially in order, stopping at the
-   *   first success; engines never tried are omitted from the response.
-   * - "hedged": stagger engine starts by hedgeDelayMs; first success wins
-   *   and pending/unstarted engines are aborted/omitted.
+   *   first success; any failure (including instant gate denials) advances
+   *   to the next engine, and engines never tried are omitted.
+   * - "hedged": stagger engine starts by hedgeDelayMs; first success wins.
+   *   Launched engines are aborted and included as failures; engines never
+   *   launched are omitted.
    */
   strategy?: SearchStrategy;
   /**
