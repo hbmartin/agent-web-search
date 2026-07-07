@@ -15,6 +15,7 @@ import type {
   Warning,
 } from "../types/index.js";
 import {
+  CircuitBreakerSchema,
   EngineConfigSchema,
   EnginesConfigSchema,
   QueryInputSchema,
@@ -76,6 +77,9 @@ export const createSearchClient = (
     ...(options.respectRateLimits === undefined
       ? {}
       : { respectRateLimits: options.respectRateLimits }),
+    ...(options.circuitBreaker
+      ? { circuitBreaker: CircuitBreakerSchema.parse(options.circuitBreaker) }
+      : {}),
   });
 
   return {
@@ -204,9 +208,7 @@ const orderSelected = (
     const entry = byId.get(id);
     return entry ? [entry] : [];
   });
-  const rest = selected.filter(
-    (entry) => !orderedSet.has(entry.adapter.id),
-  );
+  const rest = selected.filter((entry) => !orderedSet.has(entry.adapter.id));
   return [...prioritized, ...rest];
 };
 
@@ -370,7 +372,9 @@ const runEngine = async (input: {
         }),
     });
 
-    input.gate?.record(input.adapter.id, input.config, result);
+    input.gate?.record(input.adapter.id, input.config, result, {
+      aborted: input.requestOptions?.signal?.aborted === true,
+    });
     if (!result.ok) {
       safeHook(hooks, "onError", {
         engine: input.adapter.id,

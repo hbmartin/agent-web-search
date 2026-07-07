@@ -48,6 +48,7 @@ export {
 export type {
   Answer,
   Capabilities,
+  CircuitBreakerOptions,
   Citation,
   ContentOptions,
   CostBudget,
@@ -87,6 +88,7 @@ export type {
 export {
   AnswerSchema,
   builtInEngineIds,
+  CircuitBreakerSchema,
   CitationSchema,
   ContentOptionsSchema,
   EngineConfigSchema,

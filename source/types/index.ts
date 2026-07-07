@@ -286,6 +286,7 @@ export const SearchEngineErrorSchema = z
       "network",
       "upstream",
       "parse",
+      "circuit_open",
     ]),
     message: z.string(),
     status: z.number().nullable(),
@@ -379,6 +380,18 @@ export interface CostBudget {
   maxCostUsd: number;
 }
 
+export const CircuitBreakerSchema = z
+  .object({
+    /** Consecutive counted failures that open the circuit. Default 5. */
+    failureThreshold: z.number().int().positive().optional(),
+    /** How long the circuit stays open before allowing probes. Default 30000. */
+    cooldownMs: z.number().int().positive().optional(),
+    /** Concurrent trial requests allowed while half-open. Default 1. */
+    halfOpenMaxProbes: z.number().int().positive().optional(),
+  })
+  .strict();
+export type CircuitBreakerOptions = z.infer<typeof CircuitBreakerSchema>;
+
 export interface SearchClientOptions extends StrategyOptions {
   adapters?: EngineAdapter[];
   fetch?: FetchLike;
@@ -391,6 +404,16 @@ export interface SearchClientOptions extends StrategyOptions {
    * that is likely to be rejected.
    */
   respectRateLimits?: boolean;
+  /**
+   * When set, each engine gets a circuit breaker: after failureThreshold
+   * consecutive failures the engine fails fast with a "circuit_open" error
+   * (instead of adding latency to every fan-out) until cooldownMs passes,
+   * then a limited number of half-open probes decide whether it recovers.
+   * Failures caused by the query itself ("bad_request", "unsupported") and
+   * aborted runs (race/hedged losers, deadline expiry, caller aborts) never
+   * count toward opening the circuit.
+   */
+  circuitBreaker?: CircuitBreakerOptions;
 }
 
 export interface SearchRequestOptions extends StrategyOptions {

@@ -218,6 +218,7 @@ const client = createSearchClient(
   {
     respectRateLimits: true,        // fail fast while a provider reports remaining: 0
     budget: { maxCostUsd: 1 },      // hard ceiling across all searches on this client
+    circuitBreaker: {},             // per-engine breaker with default thresholds
   },
 );
 ```
@@ -225,6 +226,18 @@ const client = createSearchClient(
 - `throttle.maxConcurrent` caps in-flight requests per engine; `minIntervalMs` spaces request starts.
 - With `respectRateLimits: true`, an engine whose last response reported an exhausted rate limit fails fast with a `rate_limit` error until the provider-reported reset time, instead of burning a request.
 - The budget accrues provider-reported costs (`usage.costUsd`, e.g. Exa) or your `costPerRequestUsd` estimate; once reached, engines fail fast with a `quota` error.
+
+### Circuit breaker
+
+`respectRateLimits` only helps when a provider reports its limits; a flaky or persistently 500-ing engine would still be hit on every fan-out. Setting `circuitBreaker` (opt-in) gives every engine an independent breaker: after `failureThreshold` consecutive failures (default 5) the engine fails fast with a `circuit_open` error instead of issuing requests; after `cooldownMs` (default 30000) up to `halfOpenMaxProbes` (default 1) trial requests are let through — a success closes the circuit, a failure reopens it for another cooldown.
+
+```ts
+const client = createSearchClient(engines, {
+  circuitBreaker: { failureThreshold: 3, cooldownMs: 10_000 },
+});
+```
+
+Failures that reflect the query rather than engine health (`bad_request`, `unsupported`) never move the breaker, and neither do runs aborted from outside (race/hedged losers, deadline expiry, caller aborts). With the `all` and `race` strategies an open engine settles as an immediate `circuit_open` failure in the response; with `fallback` and `hedged` the instant denial makes the strategy skip straight to the next engine — that skip is the latency win. Breaker state is client-scoped, like the budget.
 
 ### Streaming
 
@@ -391,7 +404,7 @@ type EngineResult = EngineSuccess | EngineFailure;
 
 A successful engine result (`ok: true`) contains `results: SearchResult[]`, an optional `answer`, and `metadata`. A normalized `SearchResult` includes `url`, `title`, `snippet`/`snippets`, `publishedDate`, `author`, `score`, `source`, optional `content`/`highlights`/`image`/`favicon`, and the provider's `raw` payload.
 
-A failed engine result (`ok: false`) contains an `error` whose `kind` is one of: `auth`, `rate_limit`, `quota`, `bad_request`, `unsupported`, `timeout`, `network`, `upstream`, or `parse`, along with `metadata`.
+A failed engine result (`ok: false`) contains an `error` whose `kind` is one of: `auth`, `rate_limit`, `quota`, `bad_request`, `unsupported`, `timeout`, `network`, `upstream`, `parse`, or `circuit_open`, along with `metadata`.
 
 Both Zod schemas (`SearchResponseSchema`, `SearchResultSchema`, `AnswerSchema`, …) and TypeScript types are exported from the package root. API documentation is generated with TypeDoc and published from the `docs` workflow.
 
