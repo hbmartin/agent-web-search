@@ -70,6 +70,22 @@ describe.skipIf(!live)("live provider integration", () => {
     );
   }
 
+  it.skipIf(!(process.env.GOOGLE_PSE_API_KEY && process.env.GOOGLE_PSE_CX))(
+    "google returns normalized results",
+    { timeout: liveTimeoutMs },
+    async () => {
+      const client = createSearchClient({
+        google: {
+          apiKey: process.env.GOOGLE_PSE_API_KEY as string,
+          cx: process.env.GOOGLE_PSE_CX as string,
+        },
+      });
+
+      const response = await client.search({ query: "anthropic claude" });
+      expect(response.google?.ok).toBe(true);
+    },
+  );
+
   it.skipIf(!process.env.SEARXNG_BASE_URL)(
     "searxng returns normalized results",
     { timeout: liveTimeoutMs },

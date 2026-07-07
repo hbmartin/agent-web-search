@@ -83,6 +83,16 @@
         "default": "./dist/cjs/adapters/firecrawl.js"
       }
     },
+    "./adapters/google": {
+      "import": {
+        "types": "./dist/esm/adapters/google.d.ts",
+        "default": "./dist/esm/adapters/google.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/google.d.cts",
+        "default": "./dist/cjs/adapters/google.js"
+      }
+    },
     "./adapters/jina": {
       "import": {
         "types": "./dist/esm/adapters/jina.d.ts",
@@ -179,6 +189,16 @@
         "default": "./dist/esm/mcp/server.js"
       }
     },
+    "./otel": {
+      "import": {
+        "types": "./dist/esm/otel/index.d.ts",
+        "default": "./dist/esm/otel/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/otel/index.d.cts",
+        "default": "./dist/cjs/otel/index.js"
+      }
+    },
     "./tools": {
       "import": {
         "types": "./dist/esm/tools/index.d.ts",
@@ -222,6 +242,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.2",
     "@changesets/cli": "^2.31.0",
+    "@opentelemetry/api": "^1.9.1",
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^22",
     "@vitest/coverage-istanbul": "^4.1.9",
@@ -234,6 +255,12 @@
     "zod": "^4.4.3"
   },
   "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
     "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    }
   }
 }

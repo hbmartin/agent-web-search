@@ -53,6 +53,84 @@ describe("built-in adapters", () => {
     expect(response.brave?.ok && response.brave.raw).toBeTruthy();
   });
 
+  it("maps Google PSE request parameters and normalizes items", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({
+        searchInformation: { totalResults: "128" },
+        items: [
+          {
+            link: "https://google.example/page",
+            title: "Google title",
+            snippet: "Google snippet",
+            pagemap: {
+              cse_thumbnail: [{ src: "https://google.example/thumb.jpg" }],
+            },
+          },
+        ],
+      }),
+    );
+    const client = createSearchClient(
+      { google: { apiKey: "key", cx: "engine-id" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({
+      query: "cats",
+      count: 15,
+      freshness: "week",
+      country: "US",
+      language: "en",
+      safeSearch: "moderate",
+      includeDomains: ["example.com"],
+    });
+
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    const init = fetch.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("x-goog-api-key")).toBe("key");
+    expect(url.searchParams.has("key")).toBe(false);
+    expect(url.searchParams.get("cx")).toBe("engine-id");
+    expect(url.searchParams.get("num")).toBe("10");
+    expect(url.searchParams.get("dateRestrict")).toBe("w1");
+    expect(url.searchParams.get("gl")).toBe("us");
+    expect(url.searchParams.get("lr")).toBe("lang_en");
+    expect(url.searchParams.get("safe")).toBe("active");
+    expect(url.searchParams.get("q")).toContain("site:example.com");
+
+    expect(response.google?.ok).toBe(true);
+    if (response.google?.ok) {
+      expect(response.google.results[0]?.url).toBe(
+        "https://google.example/page",
+      );
+      expect(response.google.results[0]?.image).toBe(
+        "https://google.example/thumb.jpg",
+      );
+      expect(response.google.metadata.totalResults).toBe(128);
+      expect(
+        response.google.metadata.warnings.some(
+          (warning) => warning.code === "clamped_param",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("maps Google PSE date ranges to a date-sort restriction", async () => {
+    const fetch = vi.fn(async () => jsonResponse({ items: [] }));
+    const client = createSearchClient(
+      { google: { apiKey: "key", cx: "engine-id" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    await client.search({
+      query: "cats",
+      dateRange: { start: "2026-01-01", end: "2026-02-01" },
+      freshness: "week",
+    });
+
+    const url = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("sort")).toBe("date:r:20260101:20260201");
+    expect(url.searchParams.has("dateRestrict")).toBe(false);
+  });
+
   it("drops invalid Brave query defaults and reports warnings", async () => {
     const fetch = vi.fn(async () =>
       jsonResponse({ web: { results: [{ url: "https://brave.example" }] } }),

@@ -52,6 +52,11 @@ const expectations: Record<string, Expectation> = {
     minResults: 2,
     content: true,
   },
+  google: {
+    firstUrl: "https://example.com/espresso",
+    firstTitle: "Best espresso machines",
+    minResults: 2,
+  },
   jina: {
     firstUrl: "https://example.com/espresso",
     firstTitle: "Best espresso machines",
@@ -121,6 +126,7 @@ const configFor = (adapter: EngineAdapter): EngineConfig =>
     ...(adapter.id === "searxng"
       ? { baseUrl: "https://searx.example.test" }
       : {}),
+    ...(adapter.id === "google" ? { cx: "test-cx" } : {}),
   });
 
 const query: QueryInput = {

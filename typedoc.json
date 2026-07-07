@@ -1,7 +1,11 @@
 {
   "$schema": "https://typedoc.org/schema.json",
   "name": "agent-web-search",
-  "entryPoints": ["source/index.ts", "source/mcp/server.ts"],
+  "entryPoints": [
+    "source/index.ts",
+    "source/mcp/server.ts",
+    "source/otel/index.ts"
+  ],
   "out": "docs-dist",
   "includeVersion": true,
   "excludePrivate": true,

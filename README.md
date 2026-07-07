@@ -15,7 +15,8 @@ Query several web search APIs through a single, normalized interface. One call f
 - **Capability-aware** — unsupported query params are surfaced as warnings (or hard errors) instead of being silently dropped.
 - **Bring your own engines** — register custom adapters alongside the built-ins.
 - **Typed and validated** — runtime-validated with [Zod](https://zod.dev); ESM + CJS builds with full type declarations.
-- **Zero runtime deps beyond Zod (peer)**, browser-safe core, and a CLI for quick searches from the terminal.
+- **First-class OpenTelemetry** — an optional `agent-web-search/otel` entry maps the hooks to OTel spans and metrics (latency histograms, per-engine error counters, cost counters).
+- **Zero runtime deps beyond Zod (peer)**, browser-safe core, and a CLI for quick searches from the terminal. `@opentelemetry/api` is an optional peer used only by the OTel entry point.
 
 ## Supported engines
 
@@ -26,6 +27,7 @@ Query several web search APIs through a single, normalized interface. One call f
 | DuckDuckGo Instant Answers | `duckduckgo` | — (keyless)                              |
 | Exa                    | `exa`        | `EXA_API_KEY`                                 |
 | Firecrawl              | `firecrawl`  | `FIRECRAWL_API_KEY`                           |
+| Google Programmable Search | `google` | `GOOGLE_PSE_API_KEY` + `GOOGLE_PSE_CX`        |
 | Jina Search            | `jina`       | `JINA_API_KEY`                                |
 | Kagi                   | `kagi`       | `KAGI_API_KEY`                                |
 | Parallel               | `parallel`   | `PARALLEL_API_KEY`                            |
@@ -36,7 +38,7 @@ Query several web search APIs through a single, normalized interface. One call f
 | Tavily                 | `tavily`     | `TAVILY_API_KEY`                              |
 | You.com                | `you`        | `YOU_API_KEY`                                 |
 
-Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`).
+Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`). `google` uses the [Custom Search JSON API](https://developers.google.com/custom-search/v1/overview) and needs both an API key and a Programmable Search Engine id (`cx`) from [programmablesearchengine.google.com](https://programmablesearchengine.google.com); results are capped at 10 per request. Bing is not supported: Microsoft retired the Bing Web Search API in August 2025.
 
 ## Installation
 
@@ -201,7 +203,22 @@ await client.search({ query }, { strategy: "hedged", order: ["brave", "exa"], he
 await client.search({ query }, { deadlineMs: 5000 });
 ```
 
-With `"fallback"` and `"hedged"`, engines that were never started are omitted from the response; with `"race"`, aborted engines settle as failures and are included. `searchStream` always fans out to all engines but honors `deadlineMs` and `order`.
+| Strategy     | Launch behavior                                   | Stops when                    | In the response                                                            |
+| ------------ | ------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------- |
+| `"all"`      | Every engine at once                              | All engines settle            | Every engine, successes and failures                                        |
+| `"race"`     | Every engine at once                              | First success aborts the rest | Every engine — aborted engines are included as failures                     |
+| `"fallback"` | One engine at a time, in order                    | First success                 | Engines tried so far; engines never tried are omitted                       |
+| `"hedged"`   | One engine every `hedgeDelayMs` (default 500)     | First success aborts the rest | Launched engines (aborted ones as failures); never-launched ones are omitted |
+
+Details that matter in production:
+
+- **Ordering.** `order` applies to every strategy (and to `searchStream`): duplicates are deduped, unknown ids are ignored, and engines you don't name still run — appended after the ordered ones in config order. Under `"race"`, an aborted engine's failure carries the abort reason `"Another engine already succeeded"`.
+- **Failures advance `"fallback"`.** Any failure — including instant gate denials such as `quota`, `rate_limit`, or `circuit_open` — moves `"fallback"` to the next engine. The same instant denials are what let `"hedged"` skip a known-bad engine without waiting out its hedge delay.
+- **`deadlineMs` is one outer clock.** It is applied once (via `AbortSignal.timeout`) across all engines and all retries; per-engine `timeoutMs` and retry backoff run inside it. Expiry aborts in-flight requests and backoff sleeps, wakes `"hedged"` stagger sleeps, and stops further engines from launching. Launched engines settle as failures included in the response; never-launched engines are omitted. The hedge timer is interrupted by the deadline, never recomputed against the remaining time — so a `hedgeDelayMs` longer than the remaining deadline simply means no more engines launch.
+- **Settled means settled.** `search()` resolves only after every launched engine has actually settled (aborts included), so resources are not left dangling after a win or deadline.
+- **Consensus.** There is no separate quorum strategy: for consensus-style behavior, use `"all"` and feed the response to [`aggregate()`](#aggregation-one-deduplicated-rank-fused-list) — reciprocal rank fusion already boosts results that multiple engines agree on.
+
+`searchStream` always fans out to all engines but honors `deadlineMs` and `order`.
 
 ### Throttling, rate limits, and cost budget
 
@@ -217,6 +234,7 @@ const client = createSearchClient(
   {
     respectRateLimits: true,        // fail fast while a provider reports remaining: 0
     budget: { maxCostUsd: 1 },      // hard ceiling across all searches on this client
+    circuitBreaker: {},             // per-engine breaker with default thresholds
   },
 );
 ```
@@ -224,6 +242,18 @@ const client = createSearchClient(
 - `throttle.maxConcurrent` caps in-flight requests per engine; `minIntervalMs` spaces request starts.
 - With `respectRateLimits: true`, an engine whose last response reported an exhausted rate limit fails fast with a `rate_limit` error until the provider-reported reset time, instead of burning a request.
 - The budget accrues provider-reported costs (`usage.costUsd`, e.g. Exa) or your `costPerRequestUsd` estimate; once reached, engines fail fast with a `quota` error.
+
+### Circuit breaker
+
+`respectRateLimits` only helps when a provider reports its limits; a flaky or persistently 500-ing engine would still be hit on every fan-out. Setting `circuitBreaker` (opt-in) gives every engine an independent breaker: after `failureThreshold` consecutive failures (default 5) the engine fails fast with a `circuit_open` error instead of issuing requests; after `cooldownMs` (default 30000) up to `halfOpenMaxProbes` (default 1) trial requests are let through — a success closes the circuit, a failure reopens it for another cooldown.
+
+```ts
+const client = createSearchClient(engines, {
+  circuitBreaker: { failureThreshold: 3, cooldownMs: 10_000 },
+});
+```
+
+Failures that reflect the query rather than engine health (`bad_request`, `unsupported`) never move the breaker, and neither do runs aborted from outside (race/hedged losers, deadline expiry, caller aborts). With the `all` and `race` strategies an open engine settles as an immediate `circuit_open` failure in the response; with `fallback` and `hedged` the instant denial makes the strategy skip straight to the next engine — that skip is the latency win. Breaker state is client-scoped, like the budget.
 
 ### Streaming
 
@@ -271,6 +301,34 @@ const client = createSearchClient(engines, {
   },
 });
 ```
+
+### OpenTelemetry
+
+`agent-web-search/otel` maps the telemetry hooks to OpenTelemetry spans and metrics. It needs only [`@opentelemetry/api`](https://www.npmjs.com/package/@opentelemetry/api) (an optional peer dependency) — wire up whatever SDK/exporter you already run; with no SDK registered, the API's no-op implementations make the hooks free.
+
+```sh
+npm install @opentelemetry/api
+```
+
+```ts
+import { createSearchClient } from "agent-web-search";
+import { createOtelHooks } from "agent-web-search/otel";
+
+const client = createSearchClient(engines, { hooks: createOtelHooks() });
+```
+
+| Instrument                          | Type      | Attributes                                      |
+| ----------------------------------- | --------- | ----------------------------------------------- |
+| `agent_web_search.requests`         | counter   | `search.engine`                                 |
+| `agent_web_search.attempt.duration` | histogram (ms) | `search.engine`, `http.response.status_code` |
+| `agent_web_search.retries`          | counter   | `search.engine`, `error.kind`                   |
+| `agent_web_search.errors`           | counter   | `search.engine`, `error.kind`                   |
+| `agent_web_search.call.duration`    | histogram (ms) | `search.engine`, `ok`                        |
+| `agent_web_search.cost`             | counter (usd) | `search.engine`                              |
+
+Each settled engine call also produces a `CLIENT` span named `web_search <engine>`, backdated over the call's measured latency, with `search.engine`, `http.response.status_code`, and `search.results.count` (success) or `error.kind` + error status (failure). Because spans are constructed at settlement, they are not active while the request runs, so no trace context is propagated into provider HTTP calls.
+
+`createOtelHooks` accepts `tracer`/`meter` overrides, `spans: false` / `metrics: false` to disable either side, and a `costPerRequestUsd` map to count estimated spend for engines that don't report `usage.costUsd`. The returned object is ordinary `TelemetryHooks`, so it composes with your own hooks at client, request, or engine scope.
 
 ### Cancellation
 
@@ -325,6 +383,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-i
 | duckduckgo |   ✓    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
 | exa        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news                  |
 | firecrawl  |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news, images          |
+| google     |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web                        |
 | jina       |   —    |    ✓    |     —     |      —      |   ✓   |     —     |     —     |   emulated     |    emulated    |    ✓    |    ✓     |     —      | web                        |
 | kagi       |   —    |    —    |     —     |      —      |   ✓   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web, news                  |
 | parallel   |   —    |    —    |     —     |      ✓      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web                        |
@@ -389,7 +448,7 @@ type EngineResult = EngineSuccess | EngineFailure;
 
 A successful engine result (`ok: true`) contains `results: SearchResult[]`, an optional `answer`, and `metadata`. A normalized `SearchResult` includes `url`, `title`, `snippet`/`snippets`, `publishedDate`, `author`, `score`, `source`, optional `content`/`highlights`/`image`/`favicon`, and the provider's `raw` payload.
 
-A failed engine result (`ok: false`) contains an `error` whose `kind` is one of: `auth`, `rate_limit`, `quota`, `bad_request`, `unsupported`, `timeout`, `network`, `upstream`, or `parse`, along with `metadata`.
+A failed engine result (`ok: false`) contains an `error` whose `kind` is one of: `auth`, `rate_limit`, `quota`, `bad_request`, `unsupported`, `timeout`, `network`, `upstream`, `parse`, or `circuit_open`, along with `metadata`.
 
 Both Zod schemas (`SearchResponseSchema`, `SearchResultSchema`, `AnswerSchema`, …) and TypeScript types are exported from the package root. API documentation is generated with TypeDoc and published from the `docs` workflow.
 

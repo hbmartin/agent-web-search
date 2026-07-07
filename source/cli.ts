@@ -27,6 +27,8 @@ interface EngineEnvSource {
   // Keyless engines join only when named with --engine, so a bare CLI call
   // doesn't silently query them alongside every configured engine.
   explicitOnly?: boolean;
+  // Additional required credentials copied into the engine config verbatim.
+  extraVars?: { envVar: string; configKey: string }[];
 }
 
 const engineEnvSources: Record<EngineId, EngineEnvSource> = {
@@ -35,6 +37,11 @@ const engineEnvSources: Record<EngineId, EngineEnvSource> = {
   duckduckgo: { requiresKey: false, explicitOnly: true },
   exa: { apiKeyVar: "EXA_API_KEY", requiresKey: true },
   firecrawl: { apiKeyVar: "FIRECRAWL_API_KEY", requiresKey: true },
+  google: {
+    apiKeyVar: "GOOGLE_PSE_API_KEY",
+    requiresKey: true,
+    extraVars: [{ envVar: "GOOGLE_PSE_CX", configKey: "cx" }],
+  },
   jina: { apiKeyVar: "JINA_API_KEY", requiresKey: true },
   kagi: { apiKeyVar: "KAGI_API_KEY", requiresKey: true },
   parallel: { apiKeyVar: "PARALLEL_API_KEY", requiresKey: true },
@@ -268,6 +275,15 @@ const buildEngines = (
         return [];
       }
 
+      const extras: Record<string, string> = {};
+      for (const extra of source.extraVars ?? []) {
+        const value = env[extra.envVar];
+        if (!value) {
+          return [];
+        }
+        extras[extra.configKey] = value;
+      }
+
       return [
         [
           engine,
@@ -275,6 +291,7 @@ const buildEngines = (
             includeRaw,
             ...(apiKey ? { apiKey } : {}),
             ...(baseUrl ? { baseUrl } : {}),
+            ...extras,
           },
         ],
       ];
@@ -390,6 +407,7 @@ API key env vars
   BRAVE_API_KEY, CERAMIC_API_KEY, EXA_API_KEY, FIRECRAWL_API_KEY,
   JINA_API_KEY, KAGI_API_KEY, PARALLEL_API_KEY, PERPLEXITY_API_KEY,
   SERPAPI_API_KEY, SERPER_API_KEY, TAVILY_API_KEY, YOU_API_KEY.
+  google uses GOOGLE_PSE_API_KEY plus GOOGLE_PSE_CX (engine id);
   searxng uses SEARXNG_BASE_URL (and optional SEARXNG_API_KEY);
   duckduckgo needs no key but joins only when named with --engine.
 `;

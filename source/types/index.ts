@@ -47,6 +47,7 @@ export const builtInEngineIds = [
   "duckduckgo",
   "exa",
   "firecrawl",
+  "google",
   "jina",
   "kagi",
   "parallel",
@@ -285,6 +286,7 @@ export const SearchEngineErrorSchema = z
       "network",
       "upstream",
       "parse",
+      "circuit_open",
     ]),
     message: z.string(),
     status: z.number().nullable(),
@@ -353,18 +355,35 @@ export interface StrategyOptions {
    * How engines are dispatched:
    * - "all" (default): query every engine in parallel, return every result.
    * - "race": query every engine in parallel, first success wins and the
-   *   rest are aborted; already-settled failures are included.
+   *   rest are aborted; aborted engines are included as failures.
    * - "fallback": query engines sequentially in order, stopping at the
-   *   first success; engines never tried are omitted from the response.
-   * - "hedged": stagger engine starts by hedgeDelayMs; first success wins
-   *   and pending/unstarted engines are aborted/omitted.
+   *   first success; any failure (including instant gate denials) advances
+   *   to the next engine, and engines never tried are omitted.
+   * - "hedged": stagger engine starts by hedgeDelayMs; first success wins.
+   *   Launched engines are aborted and included as failures; engines never
+   *   launched are omitted.
    */
   strategy?: SearchStrategy;
-  /** Engine priority order for "fallback"/"hedged"; defaults to config order. */
+  /**
+   * Engine priority order, honored by every strategy. Duplicate entries are
+   * ignored, unknown ids are skipped, and engines not named are appended
+   * after the ordered ones in config order.
+   */
   order?: string[];
-  /** Delay between staggered starts for "hedged". Default 500ms. */
+  /**
+   * Delay between staggered starts for "hedged". Default 500ms. The timer
+   * is interrupted early by a win or by deadlineMs; it is never recomputed
+   * against the remaining deadline.
+   */
   hedgeDelayMs?: number;
-  /** Overall deadline for the whole search across all engines and retries. */
+  /**
+   * Overall deadline for the whole search, applied once (via
+   * AbortSignal.timeout) across all engines and all retries — per-engine
+   * timeoutMs and retry backoff run inside it. Expiry aborts in-flight
+   * requests and backoff sleeps, wakes "hedged" stagger sleeps, and stops
+   * further engines from launching. Engines already launched settle as
+   * failures included in the response; engines never launched are omitted.
+   */
   deadlineMs?: number;
 }
 
@@ -378,6 +397,18 @@ export interface CostBudget {
   maxCostUsd: number;
 }
 
+export const CircuitBreakerSchema = z
+  .object({
+    /** Consecutive counted failures that open the circuit. Default 5. */
+    failureThreshold: z.number().int().positive().optional(),
+    /** How long the circuit stays open before allowing probes. Default 30000. */
+    cooldownMs: z.number().int().positive().optional(),
+    /** Concurrent trial requests allowed while half-open. Default 1. */
+    halfOpenMaxProbes: z.number().int().positive().optional(),
+  })
+  .strict();
+export type CircuitBreakerOptions = z.infer<typeof CircuitBreakerSchema>;
+
 export interface SearchClientOptions extends StrategyOptions {
   adapters?: EngineAdapter[];
   fetch?: FetchLike;
@@ -390,6 +421,16 @@ export interface SearchClientOptions extends StrategyOptions {
    * that is likely to be rejected.
    */
   respectRateLimits?: boolean;
+  /**
+   * When set, each engine gets a circuit breaker: after failureThreshold
+   * consecutive failures the engine fails fast with a "circuit_open" error
+   * (instead of adding latency to every fan-out) until cooldownMs passes,
+   * then a limited number of half-open probes decide whether it recovers.
+   * Failures caused by the query itself ("bad_request", "unsupported") and
+   * aborted runs (race/hedged losers, deadline expiry, caller aborts) never
+   * count toward opening the circuit.
+   */
+  circuitBreaker?: CircuitBreakerOptions;
 }
 
 export interface SearchRequestOptions extends StrategyOptions {
