@@ -362,11 +362,26 @@ export interface StrategyOptions {
    *   and pending/unstarted engines are aborted/omitted.
    */
   strategy?: SearchStrategy;
-  /** Engine priority order for "fallback"/"hedged"; defaults to config order. */
+  /**
+   * Engine priority order, honored by every strategy. Duplicate entries are
+   * ignored, unknown ids are skipped, and engines not named are appended
+   * after the ordered ones in config order.
+   */
   order?: string[];
-  /** Delay between staggered starts for "hedged". Default 500ms. */
+  /**
+   * Delay between staggered starts for "hedged". Default 500ms. The timer
+   * is interrupted early by a win or by deadlineMs; it is never recomputed
+   * against the remaining deadline.
+   */
   hedgeDelayMs?: number;
-  /** Overall deadline for the whole search across all engines and retries. */
+  /**
+   * Overall deadline for the whole search, applied once (via
+   * AbortSignal.timeout) across all engines and all retries — per-engine
+   * timeoutMs and retry backoff run inside it. Expiry aborts in-flight
+   * requests and backoff sleeps, wakes "hedged" stagger sleeps, and stops
+   * further engines from launching. Engines already launched settle as
+   * failures included in the response; engines never launched are omitted.
+   */
   deadlineMs?: number;
 }
 

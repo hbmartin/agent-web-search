@@ -157,6 +157,125 @@ describe("execution strategies", () => {
     expect(response.exa?.ok).toBe(false);
   });
 
+  it("deadline shorter than the hedge delay stops later engines from launching", async () => {
+    const fetch = vi.fn(
+      async (
+        _url: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => hangUntilAbort(init?.signal as AbortSignal),
+    );
+    const client = createSearchClient(
+      {
+        ceramic: { apiKey: "a", maxRetries: 0 },
+        exa: { apiKey: "b", maxRetries: 0 },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const started = Date.now();
+    const response = await client.search(
+      { query: "q" },
+      {
+        strategy: "hedged",
+        order: ["ceramic", "exa"],
+        hedgeDelayMs: 10_000,
+        deadlineMs: 30,
+      },
+    );
+
+    // The deadline wakes the stagger sleep instead of waiting out the
+    // full hedge delay.
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // Launched engines settle as included failures; never-launched
+    // engines are omitted from the response.
+    expect(response.ceramic?.ok).toBe(false);
+    expect(response.exa).toBeUndefined();
+  });
+
+  it("deadline expiring mid-stagger aborts in-flight engines and skips pending ones", async () => {
+    const fetch = vi.fn(
+      async (
+        _url: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => hangUntilAbort(init?.signal as AbortSignal),
+    );
+    const client = createSearchClient(
+      {
+        ceramic: { apiKey: "a", maxRetries: 0 },
+        exa: { apiKey: "b", maxRetries: 0 },
+        brave: { apiKey: "c", maxRetries: 0 },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search(
+      { query: "q" },
+      {
+        strategy: "hedged",
+        order: ["ceramic", "exa", "brave"],
+        // Launches at 0ms and 100ms; the 150ms deadline lands before the
+        // third launch at 200ms.
+        hedgeDelayMs: 100,
+        deadlineMs: 150,
+      },
+    );
+
+    // Engines one and two launched before the deadline and settle as
+    // included failures; engine three never launched and is omitted.
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(response.ceramic?.ok).toBe(false);
+    expect(response.exa?.ok).toBe(false);
+    expect(response.brave).toBeUndefined();
+  });
+
+  it("hedged win before the deadline is unaffected by it", async () => {
+    const fetch = vi.fn(async () => jsonResponse(okBody));
+    const client = createSearchClient(
+      { ceramic: { apiKey: "a" }, exa: { apiKey: "b" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const started = Date.now();
+    const response = await client.search(
+      { query: "q" },
+      {
+        strategy: "hedged",
+        order: ["ceramic", "exa"],
+        hedgeDelayMs: 5000,
+        deadlineMs: 5000,
+      },
+    );
+
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(response.ceramic?.ok).toBe(true);
+    expect(response.exa).toBeUndefined();
+  });
+
+  it("deadline interrupts retry backoff sleeps", async () => {
+    const fetch = vi.fn(async () => jsonResponse("{}", 500));
+    const client = createSearchClient(
+      {
+        exa: {
+          apiKey: "a",
+          maxRetries: 5,
+          retry: { initialDelayMs: 5000, jitter: false },
+        },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const started = Date.now();
+    const response = await client.search({ query: "q" }, { deadlineMs: 40 });
+
+    // The first attempt fails upstream, then the deadline cuts the 5s
+    // backoff sleep short instead of letting retries run.
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(response.exa?.ok).toBe(false);
+  });
+
   it("negative deadlineMs fails engines instead of throwing", async () => {
     const fetch = vi.fn(
       async (
