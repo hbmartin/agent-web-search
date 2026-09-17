@@ -24,6 +24,7 @@ const engineEnv: Partial<Record<EngineId, string>> = {
   firecrawl: "FIRECRAWL_API_KEY",
   jina: "JINA_API_KEY",
   kagi: "KAGI_API_KEY",
+  linkup: "LINKUP_API_KEY",
   parallel: "PARALLEL_API_KEY",
   serpapi: "SERPAPI_API_KEY",
   serper: "SERPER_API_KEY",
@@ -94,5 +95,24 @@ describe.skipIf(!live)("live provider integration", () => {
     const client = createSearchClient({ duckduckgo: {} });
     const response = await client.search({ query: "espresso" });
     expect(response.duckduckgo?.ok).toBe(true);
+  });
+
+  it("gdelt returns news articles without a key", {
+    timeout: liveTimeoutMs,
+  }, async () => {
+    const client = createSearchClient({ gdelt: {} });
+    const response = await client.search({
+      query: "artificial intelligence",
+      count: 5,
+    });
+    expect(response.gdelt?.ok).toBe(true);
+  });
+
+  it("hackernews returns stories without a key", {
+    timeout: liveTimeoutMs,
+  }, async () => {
+    const client = createSearchClient({ hackernews: {} });
+    const response = await client.search({ query: "anthropic", count: 5 });
+    expect(response.hackernews?.ok).toBe(true);
   });
 });

@@ -1,0 +1,24 @@
+{
+  "articles": [
+    {
+      "url": "https://example.com/espresso",
+      "url_mobile": "",
+      "title": "Best espresso machines",
+      "seendate": "20260111T091500Z",
+      "socialimage": "https://example.com/espresso.jpg",
+      "domain": "example.com",
+      "language": "English",
+      "sourcecountry": "United States"
+    },
+    {
+      "url": "https://coffee.example.org/guide",
+      "url_mobile": "",
+      "title": "Espresso machine guide",
+      "seendate": "20260110T143000Z",
+      "socialimage": "",
+      "domain": "coffee.example.org",
+      "language": "English",
+      "sourcecountry": "United Kingdom"
+    }
+  ]
+}

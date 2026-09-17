@@ -5,7 +5,10 @@ import {
   builtInAdapters,
   type EngineAdapter,
   type EngineConfig,
+  type EngineResult,
   EngineResultSchema,
+  type HttpResponse,
+  type ParseContext,
   type QueryInput,
   SearchResultSchema,
 } from "../source/index.js";
@@ -52,6 +55,16 @@ const expectations: Record<string, Expectation> = {
     minResults: 2,
     content: true,
   },
+  gdelt: {
+    firstUrl: "https://example.com/espresso",
+    firstTitle: "Best espresso machines",
+    minResults: 2,
+  },
+  hackernews: {
+    firstUrl: "https://example.com/espresso",
+    firstTitle: "Best espresso machines",
+    minResults: 3,
+  },
   jina: {
     firstUrl: "https://example.com/espresso",
     firstTitle: "Best espresso machines",
@@ -63,6 +76,12 @@ const expectations: Record<string, Expectation> = {
     firstTitle: "Best espresso machines",
     minResults: 2,
     requestId: "kagi_0123456789",
+  },
+  linkup: {
+    firstUrl: "https://example.com/espresso",
+    firstTitle: "Best espresso machines",
+    minResults: 2,
+    content: true,
   },
   parallel: {
     firstUrl: "https://example.com/espresso",
@@ -122,6 +141,47 @@ const configFor = (adapter: EngineAdapter): EngineConfig =>
       ? { baseUrl: "https://searx.example.test" }
       : {}),
   });
+
+const adapterFor = (id: string): EngineAdapter => {
+  const adapter = builtInAdapters.find((item) => item.id === id);
+  if (!adapter) {
+    throw new Error(`Unknown built-in adapter: ${id}`);
+  }
+
+  return adapter;
+};
+
+const responseFor = (raw: unknown): HttpResponse => ({
+  status: 200,
+  headers: new Headers(),
+  raw,
+  text: JSON.stringify(raw),
+  url: "https://api.example.test/search",
+});
+
+const contextFor = (
+  adapter: EngineAdapter,
+  input: QueryInput,
+): ParseContext => ({
+  engine: adapter.id,
+  query: input,
+  config: configFor(adapter),
+  latencyMs: 12,
+  httpStatus: 200,
+  rateLimit: null,
+  warnings: [],
+  includeRaw: false,
+});
+
+const parseFixture = (id: string, input: QueryInput): EngineResult => {
+  const adapter = adapterFor(id);
+  return EngineResultSchema.parse(
+    adapter.parseResponse(
+      responseFor(loadFixture(id)),
+      contextFor(adapter, input),
+    ),
+  );
+};
 
 const query: QueryInput = {
   query: "best espresso machines",
@@ -242,5 +302,68 @@ describe("adapter contract fixtures", () => {
       throw new Error(`Expected ${adapter.id} fixture to parse successfully`);
     }
     expect(parsed.results.some((item) => item.content?.text)).toBe(true);
+  });
+
+  it("falls back to the HN thread URL for text posts and strips markup", () => {
+    const parsed = parseFixture("hackernews", query);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    const askHn = parsed.results.at(-1);
+    expect(askHn?.url).toBe("https://news.ycombinator.com/item?id=39000003");
+    expect(askHn?.snippet).toBe(
+      'I\'m looking for a machine under $500. Any "must have" features?',
+    );
+    expect(parsed.results[0]?.author).toBe("barista");
+    expect(parsed.results[0]?.score).toBe(214);
+    expect(parsed.metadata.totalResults).toBe(1284);
+  });
+
+  it("parses GDELT compact seendate stamps into ISO dates", () => {
+    const parsed = parseFixture("gdelt", query);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    expect(parsed.results[0]?.publishedDate).toBe("2026-01-11T09:15:00.000Z");
+    expect(parsed.results[0]?.image).toBe("https://example.com/espresso.jpg");
+    // An empty socialimage must not become an empty-string image.
+    expect(parsed.results[1]?.image).toBeNull();
+  });
+
+  it("parses the Linkup sourcedAnswer shape into an answer with citations", () => {
+    const sourced = {
+      answer: "Pressure stability matters most.",
+      sources: [
+        {
+          name: "Best espresso machines",
+          url: "https://example.com/espresso",
+          snippet: "A roundup of espresso machines.",
+        },
+      ],
+    };
+    const adapter = adapterFor("linkup");
+    const parsed = EngineResultSchema.parse(
+      adapter.parseResponse(responseFor(sourced), contextFor(adapter, query)),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    expect(parsed.answer?.text).toBe("Pressure stability matters most.");
+    expect(parsed.answer?.citations).toEqual([
+      {
+        url: "https://example.com/espresso",
+        title: "Best espresso machines",
+      },
+    ]);
+    expect(parsed.results[0]?.snippet).toBe("A roundup of espresso machines.");
   });
 });
