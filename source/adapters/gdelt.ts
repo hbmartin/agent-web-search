@@ -22,7 +22,12 @@ const maxRecords = 250;
  * GDELT 2.0 Document API. Keyless and free, covering global news in 65+
  * languages with a ~15 minute refresh. Returns article metadata only —
  * no snippets or page text — so `content` is always null and results
- * carry a title, URL, publication date, and social image.
+ * carry a title, URL, date, and social image.
+ *
+ * `publishedDate` comes from GDELT's `seendate`, which is when GDELT first
+ * saw the article, not when the publisher dated it. The two are usually
+ * close but not identical, and `seendate` is the only timestamp the
+ * ArtList response carries.
  *
  * `sourcelang:` / `sourcecountry:` filters exist but take GDELT's own
  * language and FIPS country codes rather than the ISO codes this library
@@ -142,7 +147,10 @@ const gdeltDateTime = (
     : undefined;
 };
 
-/** `seendate` arrives as `20260917T120000Z`, which `Date` cannot parse. */
+/**
+ * `seendate` (when GDELT first saw the article) arrives as
+ * `20260917T120000Z`, which `Date` cannot parse.
+ */
 const gdeltSeenDate = (value: unknown): string | null => {
   const seen = firstString(value);
   const match = seen

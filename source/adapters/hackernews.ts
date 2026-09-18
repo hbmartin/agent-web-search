@@ -21,6 +21,8 @@ const itemUrl = "https://news.ycombinator.com/item?id=";
 // Algolia caps this index at 1000 hits per page.
 const maxHitsPerPage = 1000;
 
+const engineDefaults = { tags: "story" };
+
 /**
  * Hacker News search via the public Algolia index. Keyless, unmetered, and
  * CORS-enabled — the one built-in engine that can be called directly from a
@@ -60,7 +62,6 @@ export const hackernewsAdapter: EngineAdapter = {
     ].filter((filter) => filter !== undefined);
     const mapped = {
       query: singleQuery(input.query),
-      tags: "story",
       hitsPerPage: input.count
         ? Math.min(input.count, maxHitsPerPage)
         : undefined,
@@ -70,9 +71,14 @@ export const hackernewsAdapter: EngineAdapter = {
     return {
       method: "GET",
       url: config.baseUrl ?? endpoint,
+      // engineDefaults sits beneath config.defaults so `tags` stays
+      // overridable through config rather than only through overrides.
       query: queryParams(
         "hackernews",
-        mergeParams("hackernews", config, mapped, input.overrides),
+        {
+          ...engineDefaults,
+          ...mergeParams("hackernews", config, mapped, input.overrides),
+        },
         warnings,
       ),
     };

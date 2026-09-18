@@ -336,6 +336,57 @@ describe("adapter contract fixtures", () => {
     expect(parsed.results[1]?.image).toBeNull();
   });
 
+  it("lets config.defaults override adapter request defaults", () => {
+    const linkup = adapterFor("linkup");
+    const linkupRequest = linkup.buildRequest(
+      query,
+      linkup.configSchema.parse({
+        apiKey: "test-key",
+        defaults: { outputType: "sourcedAnswer", depth: "deep" },
+      }),
+      [],
+    );
+    expect(linkupRequest.body).toMatchObject({
+      outputType: "sourcedAnswer",
+      depth: "deep",
+      q: "best espresso machines",
+    });
+
+    const hn = adapterFor("hackernews");
+    const hnRequest = hn.buildRequest(
+      query,
+      hn.configSchema.parse({ defaults: { tags: "ask_hn" } }),
+      [],
+    );
+    expect(hnRequest.query).toMatchObject({ tags: "ask_hn" });
+  });
+
+  it("applies adapter request defaults when config.defaults is absent", () => {
+    const linkup = adapterFor("linkup");
+    const linkupRequest = linkup.buildRequest(query, configFor(linkup), []);
+    expect(linkupRequest.body).toMatchObject({
+      outputType: "searchResults",
+      depth: "standard",
+    });
+
+    const hn = adapterFor("hackernews");
+    const hnRequest = hn.buildRequest(query, configFor(hn), []);
+    expect(hnRequest.query).toMatchObject({ tags: "story" });
+  });
+
+  it("lets per-request overrides win over config.defaults", () => {
+    const linkup = adapterFor("linkup");
+    const request = linkup.buildRequest(
+      { ...query, overrides: { linkup: { outputType: "structured" } } },
+      linkup.configSchema.parse({
+        apiKey: "test-key",
+        defaults: { outputType: "sourcedAnswer" },
+      }),
+      [],
+    );
+    expect(request.body).toMatchObject({ outputType: "structured" });
+  });
+
   it("parses the Linkup sourcedAnswer shape into an answer with citations", () => {
     const sourced = {
       answer: "Pressure stability matters most.",

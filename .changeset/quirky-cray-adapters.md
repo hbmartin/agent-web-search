@@ -12,8 +12,10 @@ Add three new engines: Linkup, GDELT, and Hacker News.
   improves `aggregate()`'s reciprocal rank fusion, which assumes engine
   independence.
 - **GDELT** (`gdelt`, keyless) — free global news metadata across 65+ languages
-  with a ~15 minute refresh. Returns titles, URLs, publication dates, and social
-  images but no snippets or page text, so `content` is declared unsupported.
+  with a ~15 minute refresh. Returns titles, URLs, dates, and social images but
+  no snippets or page text, so `content` is declared unsupported. `publishedDate`
+  carries GDELT's `seendate` — when GDELT first saw the article rather than the
+  publisher's own date, and the only timestamp the ArtList response returns.
   Domain filters are emulated with GDELT's `domain:` operator rather than `site:`.
 - **Hacker News** (`hackernews`, keyless) — the public Algolia index, defaulting
   to `tags=story`. Maps `points` to `score` and `author` through, filters dates

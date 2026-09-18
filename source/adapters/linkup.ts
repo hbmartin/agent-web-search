@@ -25,6 +25,8 @@ import { KeyedEngineConfigSchema } from "../types/index.js";
 
 const endpoint = "https://api.linkup.so/v1/search";
 
+const engineDefaults = { depth: "standard", outputType: "searchResults" };
+
 /**
  * Linkup search API. Defaults to the cheaper `searchResults` output type,
  * which returns page extracts without an LLM-generated answer. Configure
@@ -54,8 +56,6 @@ export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
   buildRequest(input, config) {
     const mapped = {
       q: singleQuery(input.query),
-      depth: "standard",
-      outputType: "searchResults",
       fromDate:
         input.dateRange?.start ??
         (input.freshness ? freshnessStartDate(input.freshness) : undefined),
@@ -68,7 +68,14 @@ export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
       method: "POST",
       url: config.baseUrl ?? endpoint,
       headers: { Authorization: `Bearer ${config.apiKey}` },
-      body: mergeParams("linkup", config, mapped, input.overrides),
+      // engineDefaults sits beneath config.defaults so switching to
+      // sourcedAnswer or deep search does not also require restating the
+      // query mapping; mergeParams layers defaults, then query params,
+      // then per-request overrides on top.
+      body: {
+        ...engineDefaults,
+        ...mergeParams("linkup", config, mapped, input.overrides),
+      },
     };
   },
   parseResponse(response, ctx) {
