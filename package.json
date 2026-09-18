@@ -224,13 +224,13 @@
     "@changesets/cli": "^3.0.1",
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^26",
-    "@vitest/coverage-istanbul": "^4.1.9",
+    "@vitest/coverage-istanbul": "^5.0.0",
     "esbuild": "^0.28.1",
     "fast-check": "^4.8.0",
     "publint": "^0.3.17",
     "typedoc": "^0.28.19",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.9",
+    "vitest": "^5.0.0",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
