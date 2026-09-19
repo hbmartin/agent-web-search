@@ -142,7 +142,11 @@ describe("MCP server", () => {
     const handler = createMcpHandler(fakeClient());
 
     const list = await handler(request("tools/list"));
-    const { tools } = list?.result as { tools: { name: string }[] };
+    expect(list).not.toBeNull();
+    if (!list) {
+      throw new Error("Expected tools/list response");
+    }
+    const { tools } = list.result as { tools: { name: string }[] };
     expect(tools.map((tool) => tool.name)).toEqual(["web_search"]);
 
     const call = await handler(
@@ -196,19 +200,25 @@ describe("MCP server", () => {
     ).toBeNull();
     expect(await handler(request("ping", undefined, null))).toBeNull();
     expect(
-      (await handler(
-        JSON.stringify({ jsonrpc: "2.0", id: {}, method: "ping" }),
-      ))?.error?.code,
+      (
+        await handler(
+          JSON.stringify({ jsonrpc: "2.0", id: {}, method: "ping" }),
+        )
+      )?.error?.code,
     ).toBe(-32_600);
     expect(
-      (await handler(
-        JSON.stringify({ jsonrpc: "2.0", id: null, method: "ping" }),
-      ))?.error?.code,
+      (
+        await handler(
+          JSON.stringify({ jsonrpc: "2.0", id: null, method: "ping" }),
+        )
+      )?.error?.code,
     ).toBe(-32_600);
     expect(
-      (await handler(
-        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: [] }),
-      ))?.error?.code,
+      (
+        await handler(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: [] }),
+        )
+      )?.error?.code,
     ).toBe(-32_600);
     expect((await handler(request("ping")))?.result).toEqual({});
   });

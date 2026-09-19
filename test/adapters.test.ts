@@ -12,6 +12,41 @@ const jsonResponse = (body: unknown): Response =>
   });
 
 describe("built-in adapters", () => {
+  it("honors Linkup count in strict unsupported-parameter mode", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({
+        results: [
+          {
+            name: "Linkup result",
+            url: "https://linkup.example/result",
+            favicon: "https://linkup.example/favicon.ico",
+          },
+        ],
+      }),
+    );
+    const client = createSearchClient(
+      {
+        linkup: {
+          apiKey: "key",
+          onUnsupportedParam: "error",
+        },
+      },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({ query: "linkup", count: 7 });
+    const init = fetch.mock.calls[0]?.[1];
+    expect(init).toBeDefined();
+    if (!init) {
+      throw new Error("Expected Linkup request initialization");
+    }
+    expect(JSON.parse(String(init.body))).toMatchObject({ maxResults: 7 });
+    expect(response.linkup?.ok).toBe(true);
+    expect(
+      response.linkup?.ok ? response.linkup.results[0]?.favicon : null,
+    ).toBe("https://linkup.example/favicon.ico");
+  });
+
   it("maps Brave request parameters and normalizes web results", async () => {
     const fetch = vi.fn(async () =>
       jsonResponse({

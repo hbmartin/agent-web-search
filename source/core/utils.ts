@@ -341,11 +341,17 @@ export const mergeParams = (
   config: EngineConfig,
   mapped: Record<string, unknown>,
   overrides: Record<string, Record<string, unknown>> | undefined,
-): Record<string, unknown> => ({
-  ...(config.defaults ?? {}),
-  ...mapped,
-  ...(overrides?.[engine] ?? {}),
-});
+): Record<string, unknown> => {
+  const definedMapped = Object.fromEntries(
+    Object.entries(mapped).filter(([, value]) => value !== undefined),
+  );
+
+  return {
+    ...(config.defaults ?? {}),
+    ...definedMapped,
+    ...(overrides?.[engine] ?? {}),
+  };
+};
 
 export const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
