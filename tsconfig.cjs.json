@@ -3,8 +3,7 @@
   "compilerOptions": {
     "outDir": "dist/cjs",
     "module": "CommonJS",
-    "moduleResolution": "Node10",
-    "ignoreDeprecations": "6.0",
+    "moduleResolution": "Bundler",
     "verbatimModuleSyntax": false,
     "declaration": false,
     "declarationMap": false

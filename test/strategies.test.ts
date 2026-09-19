@@ -90,9 +90,7 @@ describe("execution strategies", () => {
     );
 
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(
-      seenUrls.filter((url) => url.includes("ceramic")).length,
-    ).toBe(1);
+    expect(seenUrls.filter((url) => url.includes("ceramic")).length).toBe(1);
     expect(response.exa?.ok).toBe(true);
   });
 
@@ -267,7 +265,10 @@ describe("cost budget and rate-limit gate", () => {
     const first = client.search({ query: "q1" });
     await firstStarted;
     const controller = new AbortController();
-    const second = client.search({ query: "q2" }, { signal: controller.signal });
+    const second = client.search(
+      { query: "q2" },
+      { signal: controller.signal },
+    );
     await Promise.resolve();
     controller.abort(new Error("cancelled"));
 

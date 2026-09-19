@@ -174,10 +174,7 @@ const throwIfAborted = (signal?: AbortSignal): void => {
   }
 };
 
-const waitForSlot = (
-  state: EngineState,
-  signal?: AbortSignal,
-): Promise<void> =>
+const waitForSlot = (state: EngineState, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError(signal));

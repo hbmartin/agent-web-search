@@ -155,13 +155,9 @@ const isRequest = (message: unknown): message is JsonRpcRequest =>
   isRequestParams((message as JsonRpcRequest).params);
 
 const isRequestId = (id: unknown): id is JsonRpcRequest["id"] =>
-  id === undefined ||
-  typeof id === "string" ||
-  typeof id === "number";
+  id === undefined || typeof id === "string" || typeof id === "number";
 
-const isRequestParams = (
-  params: unknown,
-): params is JsonRpcRequest["params"] =>
+const isRequestParams = (params: unknown): params is JsonRpcRequest["params"] =>
   params === undefined ||
   (typeof params === "object" && params !== null && !Array.isArray(params));
 
