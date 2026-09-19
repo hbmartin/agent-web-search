@@ -83,6 +83,26 @@
         "default": "./dist/cjs/adapters/firecrawl.js"
       }
     },
+    "./adapters/gdelt": {
+      "import": {
+        "types": "./dist/esm/adapters/gdelt.d.ts",
+        "default": "./dist/esm/adapters/gdelt.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/gdelt.d.cts",
+        "default": "./dist/cjs/adapters/gdelt.js"
+      }
+    },
+    "./adapters/hackernews": {
+      "import": {
+        "types": "./dist/esm/adapters/hackernews.d.ts",
+        "default": "./dist/esm/adapters/hackernews.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/hackernews.d.cts",
+        "default": "./dist/cjs/adapters/hackernews.js"
+      }
+    },
     "./adapters/jina": {
       "import": {
         "types": "./dist/esm/adapters/jina.d.ts",
@@ -101,6 +121,16 @@
       "require": {
         "types": "./dist/cjs/adapters/kagi.d.cts",
         "default": "./dist/cjs/adapters/kagi.js"
+      }
+    },
+    "./adapters/linkup": {
+      "import": {
+        "types": "./dist/esm/adapters/linkup.d.ts",
+        "default": "./dist/esm/adapters/linkup.js"
+      },
+      "require": {
+        "types": "./dist/cjs/adapters/linkup.d.cts",
+        "default": "./dist/cjs/adapters/linkup.js"
       }
     },
     "./adapters/parallel": {

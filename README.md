@@ -26,8 +26,11 @@ Query several web search APIs through a single, normalized interface. One call f
 | DuckDuckGo Instant Answers | `duckduckgo` | — (keyless)                              |
 | Exa                    | `exa`        | `EXA_API_KEY`                                 |
 | Firecrawl              | `firecrawl`  | `FIRECRAWL_API_KEY`                           |
+| GDELT                  | `gdelt`      | — (keyless)                                   |
+| Hacker News (Algolia)  | `hackernews` | — (keyless)                                   |
 | Jina Search            | `jina`       | `JINA_API_KEY`                                |
 | Kagi                   | `kagi`       | `KAGI_API_KEY`                                |
+| Linkup                 | `linkup`     | `LINKUP_API_KEY`                              |
 | Parallel               | `parallel`   | `PARALLEL_API_KEY`                            |
 | SearXNG (self-hosted)  | `searxng`    | `SEARXNG_BASE_URL` (+ optional `SEARXNG_API_KEY`) |
 | SerpAPI                | `serpapi`    | `SERPAPI_API_KEY`                             |
@@ -36,7 +39,7 @@ Query several web search APIs through a single, normalized interface. One call f
 | Tavily                 | `tavily`     | `TAVILY_API_KEY`                              |
 | You.com                | `you`        | `YOU_API_KEY`                                 |
 
-Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`).
+Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`). `gdelt` returns global news *metadata* only (title, URL, date, image) with a ~15 minute refresh — no snippets or page text; its `publishedDate` is GDELT's `seendate`, i.e. when GDELT first saw the article rather than the publisher's own date. `hackernews` queries the public Algolia index and defaults to `tags=story`; override `tags` for comments, `ask_hn`, `show_hn`, `front_page`, or `author_<name>`. `linkup` defaults to the cheaper `searchResults` output type; set `defaults: { outputType: "sourcedAnswer" }` for a cited answer, or `defaults: { depth: "deep" }` for its slower, broader crawl.
 
 ## Installation
 
@@ -325,8 +328,11 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-i
 | duckduckgo |   ✓    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
 | exa        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news                  |
 | firecrawl  |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news, images          |
+| gdelt      |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    —    |    —     |     —      | news                       |
+| hackernews |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |       —        |       —        |    —    |    —     |     —      | web                        |
 | jina       |   —    |    ✓    |     —     |      —      |   ✓   |     —     |     —     |   emulated     |    emulated    |    ✓    |    ✓     |     —      | web                        |
 | kagi       |   —    |    —    |     —     |      —      |   ✓   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web, news                  |
+| linkup     |   —    |    ✓    |     —     |      —      |   —   |     ✓     |     ✓     |    native      |    native      |    —    |    —     |     —      | web                        |
 | parallel   |   —    |    —    |     —     |      ✓      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web                        |
 | searxng    |   ✓    |    —    |     —     |      —      |   ✓   |     —     |     ✓     |   emulated     |    emulated    |    —    |    ✓     |     ✓      | web, news, images, video   |
 | serpapi    |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web, news                  |
@@ -335,7 +341,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-i
 | tavily     |   ✓    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    —    |    —     |     —      | web, news                  |
 | you        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    ✓     |     ✓      | web, news                  |
 
-`native` = handled by the provider's API; `emulated` = approximated by the adapter (e.g. via query operators). Serper and DuckDuckGo also surface opportunistic answers (Google answer box / instant answer) when the provider returns one, even where `answer` is not a guaranteed capability.
+`native` = handled by the provider's API; `emulated` = approximated by the adapter (e.g. via query operators). Serper and DuckDuckGo also surface opportunistic answers (Google answer box / instant answer) when the provider returns one, even where `answer` is not a guaranteed capability; so does Linkup when configured with `outputType: "sourcedAnswer"`. GDELT emulates domain filters with its own `domain:` operator rather than `site:`, and exposes language/country only through GDELT-specific codes — reach those with `overrides`.
 
 ## CLI
 
@@ -354,7 +360,7 @@ agent-web-search -q "vector databases" --aggregate --strategy race --deadline-ms
 agent-web-search mcp
 ```
 
-By default it queries every engine that has a matching API key set in the environment (`duckduckgo`, being keyless, joins only when named with `--engine`; `searxng` joins when `SEARXNG_BASE_URL` is set).
+By default it queries every engine that has a matching API key set in the environment (the keyless `duckduckgo`, `gdelt`, and `hackernews` engines join only when named with `--engine`; `searxng` joins when `SEARXNG_BASE_URL` is set).
 
 ```text
 Options

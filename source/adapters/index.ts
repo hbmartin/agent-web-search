@@ -4,8 +4,11 @@ import { ceramicAdapter } from "./ceramic.js";
 import { duckduckgoAdapter } from "./duckduckgo.js";
 import { exaAdapter } from "./exa.js";
 import { firecrawlAdapter } from "./firecrawl.js";
+import { gdeltAdapter } from "./gdelt.js";
+import { hackernewsAdapter } from "./hackernews.js";
 import { jinaAdapter } from "./jina.js";
 import { kagiAdapter } from "./kagi.js";
+import { linkupAdapter } from "./linkup.js";
 import { parallelAdapter } from "./parallel.js";
 import { searxngAdapter } from "./searxng.js";
 import { serpapiAdapter } from "./serpapi.js";
@@ -19,8 +22,11 @@ export { ceramicAdapter } from "./ceramic.js";
 export { duckduckgoAdapter } from "./duckduckgo.js";
 export { exaAdapter } from "./exa.js";
 export { firecrawlAdapter } from "./firecrawl.js";
+export { gdeltAdapter } from "./gdelt.js";
+export { hackernewsAdapter } from "./hackernews.js";
 export { jinaAdapter } from "./jina.js";
 export { kagiAdapter } from "./kagi.js";
+export { linkupAdapter } from "./linkup.js";
 export { parallelAdapter } from "./parallel.js";
 export {
   type SearxngConfig,
@@ -39,8 +45,11 @@ export const builtInAdapters: EngineAdapter[] = [
   duckduckgoAdapter,
   exaAdapter,
   firecrawlAdapter,
+  gdeltAdapter,
+  hackernewsAdapter,
   jinaAdapter,
   kagiAdapter,
+  linkupAdapter,
   parallelAdapter,
   searxngAdapter as EngineAdapter,
   serpapiAdapter,

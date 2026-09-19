@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "type": "text",
+      "name": "Best espresso machines",
+      "url": "https://example.com/espresso",
+      "content": "A roundup of espresso machines.",
+      "date": "2026-01-11"
+    },
+    {
+      "type": "text",
+      "name": "Espresso machine guide",
+      "url": "https://coffee.example.org/guide",
+      "content": "How to pick a machine."
+    }
+  ]
+}
