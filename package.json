@@ -244,7 +244,7 @@
     "test": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check:browser": "node scripts/check-browser.mjs",
-    "docs": "pnpm dlx --package=typescript@6.0.3 --package=typedoc@0.28.20 typedoc",
+    "docs": "pnpm exec typedoc",
     "changeset": "changeset"
   },
   "type": "module",
@@ -259,7 +259,7 @@
     "fast-check": "^4.8.0",
     "publint": "^0.3.17",
     "typedoc": "^0.28.19",
-    "typescript": "^7.0.2",
+    "typescript": "6.0.3",
     "vitest": "^5.0.0",
     "zod": "^4.4.3"
   },

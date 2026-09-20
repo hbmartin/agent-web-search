@@ -1,6 +1,6 @@
 import {
-  addWarning,
   asArray,
+  clampWithWarning,
   firstString,
   freshnessStartDate,
   isObject,
@@ -70,34 +70,27 @@ export const hackernewsAdapter: EngineAdapter = {
     ].filter((filter) => filter !== undefined);
     const mapped = {
       query: singleQuery(input.query),
-      hitsPerPage: input.count
-        ? Math.min(input.count, maxHitsPerPage)
-        : undefined,
+      hitsPerPage: input.count,
       numericFilters: filters.length > 0 ? filters.join(",") : undefined,
     };
-
-    if (input.count !== undefined && input.count > maxHitsPerPage) {
-      addWarning(
-        warnings,
-        "clamped_param",
-        `hackernews count was clamped to ${maxHitsPerPage}`,
-        "count",
-      );
-    }
+    const merged: Record<string, unknown> = {
+      ...engineDefaults,
+      ...mergeParams("hackernews", config, mapped, input.overrides),
+    };
+    merged.hitsPerPage = clampWithWarning(
+      "hackernews",
+      "count",
+      merged.hitsPerPage,
+      maxHitsPerPage,
+      warnings,
+    );
 
     return {
       method: "GET",
       url: config.baseUrl ?? endpoint,
       // engineDefaults sits beneath config.defaults so `tags` stays
       // overridable through config rather than only through overrides.
-      query: queryParams(
-        "hackernews",
-        {
-          ...engineDefaults,
-          ...mergeParams("hackernews", config, mapped, input.overrides),
-        },
-        warnings,
-      ),
+      query: queryParams("hackernews", merged, warnings),
     };
   },
   parseResponse(response, ctx) {
@@ -185,6 +178,8 @@ const decodeHtmlEntity = (entity: string, encoded: string): string => {
     hexadecimal ? 16 : 10,
   );
   if (
+    (codePoint >= 0x00 && codePoint <= 0x1f) ||
+    (codePoint >= 0x7f && codePoint <= 0x9f) ||
     codePoint > 0x10_ff_ff ||
     (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff)
   ) {

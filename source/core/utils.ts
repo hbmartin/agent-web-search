@@ -44,6 +44,30 @@ export const addWarning = (
   warnings.push(param ? { code, message, param } : { code, message });
 };
 
+export const clampWithWarning = (
+  engine: string,
+  param: string,
+  value: unknown,
+  maximum: number,
+  warnings: Warning[],
+): unknown => {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= maximum
+  ) {
+    return value;
+  }
+
+  addWarning(
+    warnings,
+    "clamped_param",
+    `${engine} ${param} was clamped to ${maximum}`,
+    param,
+  );
+  return maximum;
+};
+
 export const safeHook = <K extends keyof TelemetryHooks>(
   hooks: TelemetryHooks | undefined,
   name: K,

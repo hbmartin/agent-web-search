@@ -1,6 +1,6 @@
 import {
-  addWarning,
   asArray,
+  clampWithWarning,
   firstString,
   freshnessStartDate,
   isObject,
@@ -13,6 +13,7 @@ import {
 } from "../core/utils.js";
 import type { EngineAdapter } from "../types/index.js";
 import { EngineConfigSchema } from "../types/index.js";
+import { withDomainOperators } from "./shared.js";
 
 const endpoint = "https://api.gdeltproject.org/api/v2/doc/doc";
 
@@ -66,31 +67,27 @@ export const gdeltAdapter: EngineAdapter = {
         singleQuery(input.query),
         input.includeDomains,
         input.excludeDomains,
+        "domain",
       ),
       mode: "ArtList",
       format: "json",
-      maxrecords: input.count ? Math.min(input.count, maxRecords) : undefined,
+      maxrecords: input.count,
       startdatetime: gdeltDateTime(start, "000000"),
       enddatetime: gdeltDateTime(input.dateRange?.end, "235959"),
     };
-
-    if (input.count !== undefined && input.count > maxRecords) {
-      addWarning(
-        warnings,
-        "clamped_param",
-        `gdelt count was clamped to ${maxRecords}`,
-        "count",
-      );
-    }
+    const merged = mergeParams("gdelt", config, mapped, input.overrides);
+    merged.maxrecords = clampWithWarning(
+      "gdelt",
+      "count",
+      merged.maxrecords,
+      maxRecords,
+      warnings,
+    );
 
     return {
       method: "GET",
       url: config.baseUrl ?? endpoint,
-      query: queryParams(
-        "gdelt",
-        mergeParams("gdelt", config, mapped, input.overrides),
-        warnings,
-      ),
+      query: queryParams("gdelt", merged, warnings),
     };
   },
   parseResponse(response, ctx) {
@@ -129,23 +126,6 @@ export const gdeltAdapter: EngineAdapter = {
       includeRaw: ctx.includeRaw,
     });
   },
-};
-
-/** GDELT's `domain:` operator performs suffix matching, not exact matching. */
-const withDomainOperators = (
-  query: string,
-  includeDomains: string[] | undefined,
-  excludeDomains: string[] | undefined,
-): string => {
-  const include =
-    includeDomains && includeDomains.length > 0
-      ? ` (${includeDomains.map((domain) => `domain:${domain}`).join(" OR ")})`
-      : "";
-  const exclude =
-    excludeDomains && excludeDomains.length > 0
-      ? ` ${excludeDomains.map((domain) => `-domain:${domain}`).join(" ")}`
-      : "";
-  return `${query}${include}${exclude}`;
 };
 
 /** GDELT expects `YYYYMMDDHHMMSS`, not ISO 8601. */

@@ -403,7 +403,7 @@ Both Zod schemas (`SearchResponseSchema`, `SearchResultSchema`, `AnswerSchema`, 
 
 Everything importable from the package root (client, adapters, aggregation, formatting, tools) is browser-safe: no Node builtins, `fetch`-based transport, works in browsers, Cloudflare Workers, Deno, and Bun. CI enforces this with an esbuild browser-platform bundle check (`pnpm check:browser`). The CLI and the `agent-web-search/mcp` subpath are Node-only.
 
-Caveat: most search providers do not send CORS headers and your API keys should not ship to untrusted clients — in real browser apps, proxy provider calls through your backend (`baseUrl` is configurable per engine, and you can pass a custom `fetch`). The keyless GDELT and Hacker News endpoints are exceptions: both send wildcard CORS headers and can be called directly from browsers.
+Caveat: most search providers do not send CORS headers and your API keys should not ship to untrusted clients — in real browser apps, proxy provider calls through your backend (`baseUrl` is configurable per engine, and you can pass a custom `fetch`). The keyless GDELT and Hacker News endpoints are exceptions: both are CORS-enabled and can be called directly from browsers.
 
 ## Development
 

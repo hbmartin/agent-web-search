@@ -45,11 +45,25 @@ export const firecrawlAdapter: EngineAdapter<KeyedEngineConfig> = {
   buildRequest(input, config, warnings) {
     const options = contentOptions(input.includeContent);
     const tbs = firecrawlTbs(input.freshness, input.dateRange);
-    const includeDomains = input.includeDomains;
-    const excludeDomains =
-      includeDomains && input.excludeDomains ? undefined : input.excludeDomains;
 
-    if (includeDomains && input.excludeDomains) {
+    const mapped = {
+      query: singleQuery(input.query),
+      limit: input.count,
+      country: input.country,
+      sources: [{ type: "web", ...(tbs ? { tbs } : {}) }],
+      includeDomains: input.includeDomains,
+      excludeDomains: input.excludeDomains,
+      scrapeOptions: options ? scrapeOptions(options, warnings) : undefined,
+    };
+    const merged = mergeParams("firecrawl", config, mapped, input.overrides);
+
+    if (
+      Array.isArray(merged.includeDomains) &&
+      merged.includeDomains.length > 0 &&
+      Array.isArray(merged.excludeDomains) &&
+      merged.excludeDomains.length > 0
+    ) {
+      merged.excludeDomains = undefined;
       addWarning(
         warnings,
         "provider_param_conflict",
@@ -58,21 +72,11 @@ export const firecrawlAdapter: EngineAdapter<KeyedEngineConfig> = {
       );
     }
 
-    const mapped = {
-      query: singleQuery(input.query),
-      limit: input.count,
-      country: input.country,
-      sources: [{ type: "web", ...(tbs ? { tbs } : {}) }],
-      includeDomains,
-      excludeDomains,
-      scrapeOptions: options ? scrapeOptions(options, warnings) : undefined,
-    };
-
     return {
       method: "POST",
       url: config.baseUrl ?? endpoint,
       headers: { Authorization: `Bearer ${config.apiKey}` },
-      body: mergeParams("firecrawl", config, mapped, input.overrides),
+      body: merged,
     };
   },
   parseResponse(response, ctx) {

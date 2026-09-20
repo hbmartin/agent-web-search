@@ -100,7 +100,7 @@ describe.skipIf(!live)("live provider integration", () => {
   it("gdelt returns news articles without a key", {
     timeout: liveTimeoutMs,
   }, async () => {
-    const client = createSearchClient({ gdelt: {} });
+    const client = createSearchClient({ gdelt: { includeRaw: true } });
     const response = await client.search({
       query: "artificial intelligence",
       count: 5,
@@ -111,6 +111,9 @@ describe.skipIf(!live)("live provider integration", () => {
       throw new Error(
         `gdelt failed live: ${result?.error.kind} — ${result?.error.message}`,
       );
+    }
+    if (typeof result.raw === "string") {
+      throw new Error(`gdelt returned plain text: ${result.raw.slice(0, 500)}`);
     }
     expect(result.results.length).toBeGreaterThan(0);
     for (const item of result.results) {

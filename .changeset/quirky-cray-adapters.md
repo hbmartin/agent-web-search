@@ -4,6 +4,11 @@
 
 Add three new engines: Linkup, GDELT, and Hacker News.
 
+Across all adapters, configured provider defaults are now preserved when the
+corresponding normalized query value is absent. Defined normalized values still
+override defaults, and per-request overrides remain the highest-precedence
+layer, including an explicit `undefined` to unset a configured default.
+
 - **Linkup** (`linkup`, `LINKUP_API_KEY`) — an independent commercial index with
   native include/exclude domain filters and native date-range filtering. Defaults
   to the cheaper `searchResults` output type; set
@@ -19,11 +24,13 @@ Add three new engines: Linkup, GDELT, and Hacker News.
   publisher's own date, and the only timestamp the ArtList response returns.
   Domain filters are emulated with GDELT's suffix-matching `domain:` operator
   rather than `site:` or exact `domainis:`. Counts above GDELT's 250-record limit
-  are clamped with a warning.
+  are clamped with a warning, including values supplied through provider
+  defaults or per-request overrides.
 - **Hacker News** (`hackernews`, keyless) — the public Algolia index, defaulting
   to `tags=story`. Maps `points` to `score` and `author` through, filters dates
   natively via `created_at_i`, strips HTML from post bodies, decodes named and
   numeric HTML entities, and falls back to the discussion thread URL for text
   posts (Ask HN and friends) that carry no outbound link. Counts above Algolia's
-  1000-hit limit are clamped with a warning. Hacker News and GDELT are both
-  keyless, wildcard-CORS engines that can be called directly from a browser.
+  1000-hit limit are clamped with a warning, including values supplied through
+  provider defaults or per-request overrides. Hacker News and GDELT are both
+  keyless, CORS-enabled engines that can be called directly from a browser.

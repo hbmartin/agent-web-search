@@ -1,6 +1,6 @@
 import {
-  addWarning,
   asArray,
+  clampWithWarning,
   dateRangeString,
   firstString,
   freshnessCode,
@@ -46,17 +46,7 @@ export const braveAdapter: EngineAdapter<KeyedEngineConfig> = {
       input.includeDomains,
       input.excludeDomains,
     );
-    const count =
-      input.count === undefined ? undefined : Math.min(input.count, 20);
-
-    if (input.count && input.count > 20) {
-      addWarning(
-        warnings,
-        "clamped_param",
-        "brave count was clamped to 20",
-        "count",
-      );
-    }
+    const count = clampWithWarning("brave", "count", input.count, 20, warnings);
 
     const freshness =
       dateRangeString(input.dateRange) ??
