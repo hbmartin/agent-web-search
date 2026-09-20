@@ -244,7 +244,7 @@
     "test": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "check:browser": "node scripts/check-browser.mjs",
-    "docs": "typedoc",
+    "docs": "pnpm dlx --package=typescript@6.0.3 --package=typedoc@0.28.20 typedoc",
     "changeset": "changeset"
   },
   "type": "module",

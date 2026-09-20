@@ -105,7 +105,17 @@ describe.skipIf(!live)("live provider integration", () => {
       query: "artificial intelligence",
       count: 5,
     });
-    expect(response.gdelt?.ok).toBe(true);
+    const result = response.gdelt;
+    expect(result).toBeDefined();
+    if (!result?.ok) {
+      throw new Error(
+        `gdelt failed live: ${result?.error.kind} — ${result?.error.message}`,
+      );
+    }
+    expect(result.results.length).toBeGreaterThan(0);
+    for (const item of result.results) {
+      expect(item.url).toMatch(/^https?:\/\//);
+    }
   });
 
   it("hackernews returns stories without a key", {
@@ -113,6 +123,16 @@ describe.skipIf(!live)("live provider integration", () => {
   }, async () => {
     const client = createSearchClient({ hackernews: {} });
     const response = await client.search({ query: "anthropic", count: 5 });
-    expect(response.hackernews?.ok).toBe(true);
+    const result = response.hackernews;
+    expect(result).toBeDefined();
+    if (!result?.ok) {
+      throw new Error(
+        `hackernews failed live: ${result?.error.kind} — ${result?.error.message}`,
+      );
+    }
+    expect(result.results.length).toBeGreaterThan(0);
+    for (const item of result.results) {
+      expect(item.url).toMatch(/^https?:\/\//);
+    }
   });
 });

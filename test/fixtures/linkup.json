@@ -5,7 +5,8 @@
       "name": "Best espresso machines",
       "url": "https://example.com/espresso",
       "content": "A roundup of espresso machines.",
-      "date": "2026-01-11"
+      "date": "2026-01-11",
+      "favicon": "https://example.com/favicon.ico"
     },
     {
       "type": "text",

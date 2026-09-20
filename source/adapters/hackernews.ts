@@ -1,4 +1,5 @@
 import {
+  addWarning,
   asArray,
   firstString,
   freshnessStartDate,
@@ -17,6 +18,13 @@ import { EngineConfigSchema } from "../types/index.js";
 
 const endpoint = "https://hn.algolia.com/api/v1/search";
 const itemUrl = "https://news.ycombinator.com/item?id=";
+const htmlEntityPattern = /&(quot|amp|lt|gt|#(?:[xX][\da-fA-F]+|\d+));/g;
+const namedEntities: Readonly<Record<string, string>> = {
+  quot: '"',
+  amp: "&",
+  lt: "<",
+  gt: ">",
+};
 
 // Algolia caps this index at 1000 hits per page.
 const maxHitsPerPage = 1000;
@@ -25,9 +33,9 @@ const engineDefaults = { tags: "story" };
 
 /**
  * Hacker News search via the public Algolia index. Keyless, unmetered, and
- * CORS-enabled — the one built-in engine that can be called directly from a
- * browser without proxying. Defaults to `tags=story`; override it for
- * comments, Ask HN, Show HN, front page, or a specific author.
+ * CORS-enabled, so it can be called directly from a browser without proxying.
+ * Defaults to `tags=story`; override it for comments, Ask HN, Show HN, front
+ * page, or a specific author.
  *
  * The index has no domain facet, so domain filters are unsupported rather
  * than emulated: Algolia has no `site:` operator to fall back on.
@@ -67,6 +75,15 @@ export const hackernewsAdapter: EngineAdapter = {
         : undefined,
       numericFilters: filters.length > 0 ? filters.join(",") : undefined,
     };
+
+    if (input.count !== undefined && input.count > maxHitsPerPage) {
+      addWarning(
+        warnings,
+        "clamped_param",
+        `hackernews count was clamped to ${maxHitsPerPage}`,
+        "count",
+      );
+    }
 
     return {
       method: "GET",
@@ -151,12 +168,28 @@ const stripHtml = (value: string | null): string | null => {
 
   const text = value
     .replaceAll(/<[^>]*>/g, " ")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#x27;", "'")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&amp;", "&")
+    .replaceAll(htmlEntityPattern, decodeHtmlEntity)
     .replaceAll(/\s+/g, " ")
     .trim();
   return text.length > 0 ? text : null;
+};
+
+const decodeHtmlEntity = (entity: string, encoded: string): string => {
+  if (!encoded.startsWith("#")) {
+    return namedEntities[encoded] ?? entity;
+  }
+
+  const hexadecimal = encoded[1] === "x" || encoded[1] === "X";
+  const codePoint = Number.parseInt(
+    encoded.slice(hexadecimal ? 2 : 1),
+    hexadecimal ? 16 : 10,
+  );
+  if (
+    codePoint > 0x10_ff_ff ||
+    (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff)
+  ) {
+    return entity;
+  }
+
+  return String.fromCodePoint(codePoint);
 };

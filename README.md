@@ -39,7 +39,7 @@ Query several web search APIs through a single, normalized interface. One call f
 | Tavily                 | `tavily`     | `TAVILY_API_KEY`                              |
 | You.com                | `you`        | `YOU_API_KEY`                                 |
 
-Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`). `gdelt` returns global news *metadata* only (title, URL, date, image) with a ~15 minute refresh — no snippets or page text; its `publishedDate` is GDELT's `seendate`, i.e. when GDELT first saw the article rather than the publisher's own date. `hackernews` queries the public Algolia index and defaults to `tags=story`; override `tags` for comments, `ask_hn`, `show_hn`, `front_page`, or `author_<name>`. `linkup` defaults to the cheaper `searchResults` output type; set `defaults: { outputType: "sourcedAnswer" }` for a cited answer, or `defaults: { depth: "deep" }` for its slower, broader crawl.
+Notes: `duckduckgo` hits the free Instant Answer API — encyclopedic abstracts and related topics, not full web results. `searxng` requires a self-hosted instance with the JSON output format enabled (`search.formats: [html, json]` in `settings.yml`). `gdelt` returns global news *metadata* only (title, URL, date, image) with a ~15 minute refresh — no snippets or page text; its `publishedDate` is GDELT's `seendate`, i.e. when GDELT first saw the article rather than the publisher's own date. GDELT's `domain:` filter performs suffix matching, so `domain:example.com` can also match a longer domain ending in `example.com`; this adapter intentionally preserves that fuzzy behavior rather than using the exact `domainis:` operator. `hackernews` queries the public Algolia index and defaults to `tags=story`; override `tags` for comments, `ask_hn`, `show_hn`, `front_page`, or `author_<name>`. `linkup` defaults to the cheaper `searchResults` output type; set `defaults: { outputType: "sourcedAnswer" }` for a cited answer, or `defaults: { depth: "deep" }` for its slower, broader crawl.
 
 ## Installation
 
@@ -332,7 +332,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-i
 | hackernews |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |       —        |       —        |    —    |    —     |     —      | web                        |
 | jina       |   —    |    ✓    |     —     |      —      |   ✓   |     —     |     —     |   emulated     |    emulated    |    ✓    |    ✓     |     —      | web                        |
 | kagi       |   —    |    —    |     —     |      —      |   ✓   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web, news                  |
-| linkup     |   —    |    ✓    |     —     |      —      |   —   |     ✓     |     ✓     |    native      |    native      |    —    |    —     |     —      | web                        |
+| linkup     |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    —    |    —     |     —      | web                        |
 | parallel   |   —    |    —    |     —     |      ✓      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web                        |
 | searxng    |   ✓    |    —    |     —     |      —      |   ✓   |     —     |     ✓     |   emulated     |    emulated    |    —    |    ✓     |     ✓      | web, news, images, video   |
 | serpapi    |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web, news                  |
@@ -341,7 +341,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-i
 | tavily     |   ✓    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    —    |    —     |     —      | web, news                  |
 | you        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    ✓     |     ✓      | web, news                  |
 
-`native` = handled by the provider's API; `emulated` = approximated by the adapter (e.g. via query operators). Serper and DuckDuckGo also surface opportunistic answers (Google answer box / instant answer) when the provider returns one, even where `answer` is not a guaranteed capability; so does Linkup when configured with `outputType: "sourcedAnswer"`. GDELT emulates domain filters with its own `domain:` operator rather than `site:`, and exposes language/country only through GDELT-specific codes — reach those with `overrides`.
+`native` = handled by the provider's API; `emulated` = approximated by the adapter (e.g. via query operators). Serper and DuckDuckGo also surface opportunistic answers (Google answer box / instant answer) when the provider returns one, even where `answer` is not a guaranteed capability; so does Linkup when configured with `outputType: "sourcedAnswer"`. GDELT emulates domain filters with its suffix-matching `domain:` operator rather than `site:` or exact `domainis:`, and exposes language/country only through GDELT-specific codes — reach those with `overrides`.
 
 ## CLI
 
@@ -403,7 +403,7 @@ Both Zod schemas (`SearchResponseSchema`, `SearchResultSchema`, `AnswerSchema`, 
 
 Everything importable from the package root (client, adapters, aggregation, formatting, tools) is browser-safe: no Node builtins, `fetch`-based transport, works in browsers, Cloudflare Workers, Deno, and Bun. CI enforces this with an esbuild browser-platform bundle check (`pnpm check:browser`). The CLI and the `agent-web-search/mcp` subpath are Node-only.
 
-Caveat: most search providers do not send CORS headers and your API keys should not ship to untrusted clients — in real browser apps, proxy provider calls through your backend (`baseUrl` is configurable per engine, and you can pass a custom `fetch`).
+Caveat: most search providers do not send CORS headers and your API keys should not ship to untrusted clients — in real browser apps, proxy provider calls through your backend (`baseUrl` is configurable per engine, and you can pass a custom `fetch`). The keyless GDELT and Hacker News endpoints are exceptions: both send wildcard CORS headers and can be called directly from browsers.
 
 ## Development
 

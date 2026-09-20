@@ -1,4 +1,5 @@
 import {
+  addWarning,
   asArray,
   firstString,
   freshnessStartDate,
@@ -33,6 +34,8 @@ const maxRecords = 250;
  * language and FIPS country codes rather than the ISO codes this library
  * normalizes to, so `country` and `language` are declared unsupported;
  * reach them with `overrides` when you know GDELT's codes.
+ * Domain filters use GDELT's suffix-matching `domain:` operator, so a filter
+ * can also match longer domain names that end with the requested value.
  */
 export const gdeltAdapter: EngineAdapter = {
   id: "gdelt",
@@ -70,6 +73,15 @@ export const gdeltAdapter: EngineAdapter = {
       startdatetime: gdeltDateTime(start, "000000"),
       enddatetime: gdeltDateTime(input.dateRange?.end, "235959"),
     };
+
+    if (input.count !== undefined && input.count > maxRecords) {
+      addWarning(
+        warnings,
+        "clamped_param",
+        `gdelt count was clamped to ${maxRecords}`,
+        "count",
+      );
+    }
 
     return {
       method: "GET",
@@ -119,7 +131,7 @@ export const gdeltAdapter: EngineAdapter = {
   },
 };
 
-/** GDELT uses `domain:` operators rather than the usual `site:`. */
+/** GDELT's `domain:` operator performs suffix matching, not exact matching. */
 const withDomainOperators = (
   query: string,
   includeDomains: string[] | undefined,

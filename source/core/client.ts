@@ -204,9 +204,7 @@ const orderSelected = (
     const entry = byId.get(id);
     return entry ? [entry] : [];
   });
-  const rest = selected.filter(
-    (entry) => !orderedSet.has(entry.adapter.id),
-  );
+  const rest = selected.filter((entry) => !orderedSet.has(entry.adapter.id));
   return [...prioritized, ...rest];
 };
 

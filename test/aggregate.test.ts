@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  aggregate,
   type AggregatedSearchResponse,
+  aggregate,
   type EngineResult,
   formatForLLM,
   normalizeUrlForDedupe,
@@ -67,9 +67,9 @@ describe("normalizeUrlForDedupe", () => {
   });
 
   it("re-encodes and sorts query parameters", () => {
-    expect(
-      normalizeUrlForDedupe("https://example.com/search?b=2&a=1"),
-    ).toBe(normalizeUrlForDedupe("https://example.com/search?a=1&b=2"));
+    expect(normalizeUrlForDedupe("https://example.com/search?b=2&a=1")).toBe(
+      normalizeUrlForDedupe("https://example.com/search?a=1&b=2"),
+    );
     expect(
       normalizeUrlForDedupe("https://example.com/search?q=a%26b%3Dc"),
     ).not.toBe(normalizeUrlForDedupe("https://example.com/search?q=a&b=c"));

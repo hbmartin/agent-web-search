@@ -93,9 +93,11 @@ describe("createSearchClient", () => {
     const onRequest = vi.fn();
     const fetch = vi.fn(
       async (_url: string | URL | Request, init?: RequestInit) => {
-        expect((init?.headers as Record<string, string>)["x-api-key"]).toBe(
-          "exa-key",
-        );
+        expect(init).toBeDefined();
+        if (!init) {
+          throw new Error("Expected request initialization");
+        }
+        expect(new Headers(init.headers).get("x-api-key")).toBe("exa-key");
         return jsonResponse({ results: [] });
       },
     );
@@ -214,7 +216,10 @@ describe("createSearchClient", () => {
     const fetch = vi.fn(
       async (_url: string | URL | Request, init?: RequestInit) =>
         await new Promise<Response>((_resolve, reject) => {
-          (init?.signal as AbortSignal).addEventListener(
+          if (!init?.signal) {
+            throw new Error("Expected request signal");
+          }
+          init.signal.addEventListener(
             "abort",
             () => reject(new Error("aborted")),
             { once: true },
@@ -266,7 +271,10 @@ describe("createSearchClient", () => {
         new Response(
           new ReadableStream<Uint8Array>({
             start(controller) {
-              (init?.signal as AbortSignal).addEventListener(
+              if (!init?.signal) {
+                throw new Error("Expected request signal");
+              }
+              init.signal.addEventListener(
                 "abort",
                 () => controller.error(new Error("aborted")),
                 { once: true },

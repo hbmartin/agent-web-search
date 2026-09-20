@@ -42,7 +42,7 @@ export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
     streaming: false,
     multiQuery: false,
     params: {
-      count: false,
+      count: true,
       dateRange: true,
       freshness: true,
       includeDomains: "native",
@@ -56,6 +56,7 @@ export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
   buildRequest(input, config) {
     const mapped = {
       q: singleQuery(input.query),
+      maxResults: input.count,
       fromDate:
         input.dateRange?.start ??
         (input.freshness ? freshnessStartDate(input.freshness) : undefined),
@@ -99,6 +100,7 @@ export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
           score: numberOrNull(item.relevanceScore),
           content: truncateContent(linkupContent(text, options), maxChars),
           image: isImage ? firstString(item.url) : null,
+          favicon: firstString(item.favicon),
           raw: item,
         });
       })

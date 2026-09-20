@@ -69,7 +69,8 @@
         "useSimplifiedLogicExpression": "error",
         "useWhile": "error",
         "noExcessiveLinesPerFunction": "error",
-        "noImplicitCoercions": "error"
+        "noImplicitCoercions": "error",
+        "useArrayFind": "error"
       },
       "correctness": {
         "noConstantCondition": "error",
@@ -115,36 +116,16 @@
         "noPrivateImports": "error",
         "noUndeclaredDependencies": "error",
         "useImportExtensions": "off",
-        "useJsonImportAttributes": "error"
+        "useJsonImportAttributes": "error",
+        "noDuplicateArgumentNames": "error",
+        "noDuplicateVariableNames": "error"
       },
       "nursery": {
-        "noNestedPromises": "error",
-        "noContinue": "error",
-        "noTernary": "off",
-        "noDuplicatedSpreadProps": "error",
-        "noEqualsToNull": "error",
         "noFloatingPromises": "error",
-        "noForIn": "error",
-        "noIncrementDecrement": "error",
         "noMisusedPromises": "error",
-        "noMultiAssign": "error",
-        "noMultiStr": "error",
-        "noParametersOnlyUsedInRecursion": "error",
-        "noProto": "error",
-        "noReturnAssign": "error",
-        "noShadow": "error",
-        "noUndeclaredEnvVars": "error",
-        "noUnnecessaryConditions": "error",
-        "useArraySortCompare": "error",
-        "useDestructuring": "error",
         "useExhaustiveSwitchCases": "error",
-        "useFind": "error",
         "useRegexpExec": "error",
-        "useRequiredScripts": "error",
-        "useSpread": "error",
-        "noDuplicateArgumentNames": "error",
-        "noDuplicateFieldDefinitionNames": "error",
-        "noDuplicateVariableNames": "error"
+        "noDuplicateFieldDefinitionNames": "error"
       },
       "performance": {
         "noAccumulatingSpread": "error",
@@ -230,7 +211,14 @@
         "useConsistentCurlyBraces": "error",
         "useExplicitLengthCheck": "error",
         "useExportsLast": "error",
-        "useSingleVarDeclarator": "error"
+        "useSingleVarDeclarator": "error",
+        "noContinue": "error",
+        "noTernary": "off",
+        "noIncrementDecrement": "error",
+        "noMultiAssign": "error",
+        "noMultilineString": "error",
+        "useDestructuring": "error",
+        "useSpreadOverApply": "error"
       },
       "suspicious": {
         "noAlert": "error",
@@ -308,7 +296,19 @@
         "useNamespaceKeyword": "error",
         "useNumberToFixedDigitsArgument": "error",
         "useStrictMode": "error",
-        "noConsole": "error"
+        "noConsole": "error",
+        "noNestedPromises": "error",
+        "noDuplicatedSpreadProps": "error",
+        "noEqualsToNull": "error",
+        "noForIn": "error",
+        "noParametersOnlyUsedInRecursion": "error",
+        "noProto": "error",
+        "noReturnAssign": "error",
+        "noShadow": "error",
+        "noUndeclaredEnvVars": "error",
+        "noUnnecessaryConditions": "error",
+        "useArraySortCompare": "error",
+        "useRequiredScripts": "error"
       }
     }
   },
@@ -344,7 +344,8 @@
             "noExcessiveLinesPerFunction": "off"
           },
           "style": {
-            "noProcessEnv": "off"
+            "noProcessEnv": "off",
+            "noIncrementDecrement": "off"
           },
           "suspicious": {
             "noConsole": "off",
@@ -354,8 +355,16 @@
           "security": {
             "noSecrets": "off"
           },
-          "nursery": {
-            "noIncrementDecrement": "off"
+          "nursery": {}
+        }
+      }
+    },
+    {
+      "includes": ["test/live.test.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noMisplacedAssertion": "off"
           }
         }
       }
@@ -401,17 +410,18 @@
             "noExcessiveLinesPerFunction": "off",
             "noVoid": "off"
           },
-          "nursery": {
-            "useDestructuring": "off",
-            "noContinue": "off",
-            "noUnnecessaryConditions": "off"
-          },
+          "nursery": {},
           "performance": {
             "useTopLevelRegex": "off"
           },
           "style": {
             "useExportsLast": "off",
-            "noNestedTernary": "off"
+            "noNestedTernary": "off",
+            "useDestructuring": "off",
+            "noContinue": "off"
+          },
+          "suspicious": {
+            "noUnnecessaryConditions": "off"
           }
         }
       }
@@ -457,11 +467,10 @@
           },
           "suspicious": {
             "noConsole": "off",
-            "noExplicitAny": "off"
-          },
-          "nursery": {
+            "noExplicitAny": "off",
             "noUndeclaredEnvVars": "off"
-          }
+          },
+          "nursery": {}
         }
       }
     },
