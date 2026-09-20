@@ -595,8 +595,9 @@ describe("adapter contract fixtures", () => {
     });
   });
 
-  it("clamps GDELT and HN counts only above provider limits", () => {
+  it("clamps count-capable adapters only above provider limits", () => {
     const cases = [
+      { id: "brave", limit: 20, parameter: "count" },
       { id: "gdelt", limit: 250, parameter: "maxrecords" },
       { id: "hackernews", limit: 1000, parameter: "hitsPerPage" },
     ];
