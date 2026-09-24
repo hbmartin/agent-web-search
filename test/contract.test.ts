@@ -323,7 +323,7 @@ describe("adapter contract fixtures", () => {
     expect(parsed.metadata.totalResults).toBe(1284);
   });
 
-  it("decodes valid HN numeric entities and preserves invalid code points", () => {
+  it("decodes valid HN numeric entities and preserves disallowed code points", () => {
     const adapter = adapterFor("hackernews");
     const raw = {
       hits: [
@@ -331,7 +331,7 @@ describe("adapter contract fixtures", () => {
           objectID: "numeric-entities",
           title: "Entity handling",
           story_text:
-            "<p>slashes: &#47; &#x2F; &#X2f;; named: &amp;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &#38;lt; &amp;#x2F;</p>",
+            "<p>slashes: &#47; &#x2F; &#X2f;; named: &amp;; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &#38;lt; &amp;#x2F;</p>",
         },
       ],
       nbHits: 1,
@@ -344,9 +344,19 @@ describe("adapter contract fixtures", () => {
     if (!parsed.ok) {
       return;
     }
-    expect(parsed.results[0]?.snippet).toBe(
-      "slashes: / / /; named: &; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &lt; &#x2F;",
+    const snippet = parsed.results[0]?.snippet;
+    expect(snippet).toBe(
+      "slashes: / / /; named: &; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &lt; &#x2F;",
     );
+    expect(
+      [...(snippet ?? "")].some((character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return (
+          (codePoint >= 0x00 && codePoint <= 0x1f) ||
+          (codePoint >= 0x7f && codePoint <= 0x9f)
+        );
+      }),
+    ).toBe(false);
   });
 
   it("parses GDELT compact seendate stamps into ISO dates", () => {
@@ -430,6 +440,7 @@ describe("adapter contract fixtures", () => {
         defaults: {
           retained: "configured",
           undefinedMapped: "configured",
+          unsetByOverride: "configured",
           precedence: "configured",
         },
       },
@@ -442,12 +453,13 @@ describe("adapter contract fixtures", () => {
         emptyString: "",
         emptyArray: [],
       },
-      { test: { precedence: "override" } },
+      { test: { precedence: "override", unsetByOverride: undefined } },
     );
 
     expect(merged).toEqual({
       retained: "configured",
       undefinedMapped: "configured",
+      unsetByOverride: undefined,
       precedence: "override",
       nullValue: null,
       falseValue: false,
@@ -455,6 +467,77 @@ describe("adapter contract fixtures", () => {
       emptyString: "",
       emptyArray: [],
     });
+    expect(Object.hasOwn(merged, "unsetByOverride")).toBe(true);
+  });
+
+  it("resolves effective provider domain conflicts after parameter merging", () => {
+    const cases = [
+      {
+        id: "firecrawl",
+        includeKey: "includeDomains",
+        excludeKey: "excludeDomains",
+      },
+      {
+        id: "you",
+        includeKey: "include_domains",
+        excludeKey: "exclude_domains",
+      },
+    ];
+
+    for (const { id, includeKey, excludeKey } of cases) {
+      const adapter = adapterFor(id);
+      const expectedWarning = {
+        code: "provider_param_conflict",
+        message: expect.stringContaining("include"),
+        param: "excludeDomains",
+      };
+      const scenarios = [
+        {
+          input: { ...query, includeDomains: ["query.example"] },
+          config: adapter.configSchema.parse({
+            apiKey: "test-key",
+            defaults: { [excludeKey]: ["default-blocked.example"] },
+          }),
+          expectedInclude: ["query.example"],
+        },
+        {
+          input: {
+            ...query,
+            includeDomains: ["query.example"],
+            excludeDomains: ["query-blocked.example"],
+          },
+          config: configFor(adapter),
+          expectedInclude: ["query.example"],
+        },
+        {
+          input: {
+            ...query,
+            overrides: {
+              [id]: { [excludeKey]: ["override-blocked.example"] },
+            },
+          },
+          config: adapter.configSchema.parse({
+            apiKey: "test-key",
+            defaults: { [includeKey]: ["default.example"] },
+          }),
+          expectedInclude: ["default.example"],
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        const warnings: Warning[] = [];
+        const request = adapter.buildRequest(
+          scenario.input,
+          scenario.config,
+          warnings,
+        );
+        const params = request.body as Record<string, unknown>;
+
+        expect(params[includeKey]).toEqual(scenario.expectedInclude);
+        expect(params[excludeKey]).toBeUndefined();
+        expect(warnings).toEqual([expectedWarning]);
+      }
+    }
   });
 
   it("applies adapter request defaults when config.defaults is absent", () => {
@@ -512,8 +595,9 @@ describe("adapter contract fixtures", () => {
     });
   });
 
-  it("clamps GDELT and HN counts only above provider limits", () => {
+  it("clamps count-capable adapters only above provider limits", () => {
     const cases = [
+      { id: "brave", limit: 20, parameter: "count" },
       { id: "gdelt", limit: 250, parameter: "maxrecords" },
       { id: "hackernews", limit: 1000, parameter: "hitsPerPage" },
     ];
@@ -543,6 +627,55 @@ describe("adapter contract fixtures", () => {
           param: "count",
         },
       ]);
+
+      const defaultWarnings: Warning[] = [];
+      const configured = adapter.buildRequest(
+        query,
+        adapter.configSchema.parse({
+          apiKey: "test-key",
+          defaults: { [parameter]: limit + 1 },
+        }),
+        defaultWarnings,
+      );
+      expect(configured.query?.[parameter]).toBe(limit);
+      expect(defaultWarnings).toEqual([
+        {
+          code: "clamped_param",
+          message: `${id} count was clamped to ${limit}`,
+          param: "count",
+        },
+      ]);
+
+      const overrideWarnings: Warning[] = [];
+      const overriddenHigh = adapter.buildRequest(
+        {
+          ...query,
+          overrides: { [id]: { [parameter]: limit + 1 } },
+        },
+        configFor(adapter),
+        overrideWarnings,
+      );
+      expect(overriddenHigh.query?.[parameter]).toBe(limit);
+      expect(overrideWarnings).toEqual([
+        {
+          code: "clamped_param",
+          message: `${id} count was clamped to ${limit}`,
+          param: "count",
+        },
+      ]);
+
+      const effectiveWarnings: Warning[] = [];
+      const overriddenLow = adapter.buildRequest(
+        {
+          ...query,
+          count: limit + 1,
+          overrides: { [id]: { [parameter]: limit - 1 } },
+        },
+        configFor(adapter),
+        effectiveWarnings,
+      );
+      expect(overriddenLow.query?.[parameter]).toBe(limit - 1);
+      expect(effectiveWarnings).toEqual([]);
     }
   });
 

@@ -48,18 +48,6 @@ export const youAdapter: EngineAdapter<KeyedEngineConfig> = {
   },
   buildRequest(input, config, warnings) {
     const options = contentOptions(input.includeContent);
-    const includeDomains = input.includeDomains;
-    const excludeDomains =
-      includeDomains && input.excludeDomains ? undefined : input.excludeDomains;
-
-    if (includeDomains && input.excludeDomains) {
-      addWarning(
-        warnings,
-        "provider_param_conflict",
-        "you cannot combine include_domains and exclude_domains; include_domains wins",
-        "excludeDomains",
-      );
-    }
 
     const mapped = {
       query: singleQuery(input.query),
@@ -70,11 +58,27 @@ export const youAdapter: EngineAdapter<KeyedEngineConfig> = {
       country: input.country,
       language: input.language,
       safesearch: input.safeSearch,
-      include_domains: includeDomains,
-      exclude_domains: excludeDomains,
+      include_domains: input.includeDomains,
+      exclude_domains: input.excludeDomains,
       ...(options ? livecrawlParams(options, warnings) : {}),
     };
     const merged = mergeParams("you", config, mapped, input.overrides);
+
+    if (
+      Array.isArray(merged.include_domains) &&
+      merged.include_domains.length > 0 &&
+      Array.isArray(merged.exclude_domains) &&
+      merged.exclude_domains.length > 0
+    ) {
+      merged.exclude_domains = undefined;
+      addWarning(
+        warnings,
+        "provider_param_conflict",
+        "you cannot combine include_domains and exclude_domains; include_domains wins",
+        "excludeDomains",
+      );
+    }
+
     const method = shouldPost(merged) ? "POST" : "GET";
 
     return {

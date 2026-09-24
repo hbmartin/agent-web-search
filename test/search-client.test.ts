@@ -92,14 +92,8 @@ describe("createSearchClient", () => {
   it("redacts auth headers in request telemetry", async () => {
     const onRequest = vi.fn();
     const fetch = vi.fn(
-      async (_url: string | URL | Request, init?: RequestInit) => {
-        expect(init).toBeDefined();
-        if (!init) {
-          throw new Error("Expected request initialization");
-        }
-        expect(new Headers(init.headers).get("x-api-key")).toBe("exa-key");
-        return jsonResponse({ results: [] });
-      },
+      async (_url: string | URL | Request, _init?: RequestInit) =>
+        jsonResponse({ results: [] }),
     );
     const client = createSearchClient(
       {
@@ -111,8 +105,13 @@ describe("createSearchClient", () => {
       { fetch: fetch as typeof globalThis.fetch },
     );
 
-    await client.search({ query: "redact" });
+    const response = await client.search({ query: "redact" });
 
+    expect(response.exa?.ok).toBe(true);
+    expect(fetch).toHaveBeenCalledOnce();
+    const init = fetch.mock.calls[0]?.[1];
+    expect(init).toBeDefined();
+    expect(new Headers(init?.headers).get("x-api-key")).toBe("exa-key");
     expect(onRequest).toHaveBeenCalledOnce();
     expect(onRequest.mock.calls[0]?.[0].request.headers["x-api-key"]).toBe(
       "[redacted]",

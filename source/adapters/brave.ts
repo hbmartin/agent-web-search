@@ -1,6 +1,6 @@
 import {
-  addWarning,
   asArray,
+  clampWithWarning,
   dateRangeString,
   firstString,
   freshnessCode,
@@ -46,40 +46,32 @@ export const braveAdapter: EngineAdapter<KeyedEngineConfig> = {
       input.includeDomains,
       input.excludeDomains,
     );
-    const count =
-      input.count === undefined ? undefined : Math.min(input.count, 20);
-
-    if (input.count && input.count > 20) {
-      addWarning(
-        warnings,
-        "clamped_param",
-        "brave count was clamped to 20",
-        "count",
-      );
-    }
-
     const freshness =
       dateRangeString(input.dateRange) ??
       (input.freshness ? freshnessCode(input.freshness) : undefined);
     const mapped = {
       q: query,
-      count,
+      count: input.count,
       freshness,
       country: input.country,
       search_lang: input.language,
       safesearch: input.safeSearch,
       extra_snippets: true,
     };
+    const params = mergeParams("brave", config, mapped, input.overrides);
+    params.count = clampWithWarning(
+      "brave",
+      "count",
+      params.count,
+      20,
+      warnings,
+    );
 
     return {
       method: "GET",
       url: config.baseUrl ?? endpoint,
       headers: { "X-Subscription-Token": config.apiKey },
-      query: queryParams(
-        "brave",
-        mergeParams("brave", config, mapped, input.overrides),
-        warnings,
-      ),
+      query: queryParams("brave", params, warnings),
     };
   },
   parseResponse(response, ctx) {
