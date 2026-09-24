@@ -331,7 +331,7 @@ describe("adapter contract fixtures", () => {
           objectID: "numeric-entities",
           title: "Entity handling",
           story_text:
-            "<p>slashes: &#47; &#x2F; &#X2f;; named: &amp;; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &#38;lt; &amp;#x2F;</p>",
+            "<p>slashes: &#47; &#x2F; &#X2f;; named: &amp;; whitespace: a&#9;b&#10;c&#xC;d&#13;e; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &#38;lt; &amp;#x2F;</p>",
         },
       ],
       nbHits: 1,
@@ -346,7 +346,7 @@ describe("adapter contract fixtures", () => {
     }
     const snippet = parsed.results[0]?.snippet;
     expect(snippet).toBe(
-      "slashes: / / /; named: &; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &lt; &#x2F;",
+      "slashes: / / /; named: &; whitespace: a b c d e; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &lt; &#x2F;",
     );
     expect(
       [...(snippet ?? "")].some((character) => {
@@ -371,6 +371,48 @@ describe("adapter contract fixtures", () => {
     expect(parsed.results[0]?.image).toBe("https://example.com/espresso.jpg");
     // An empty socialimage must not become an empty-string image.
     expect(parsed.results[1]?.image).toBeNull();
+  });
+
+  it("reports non-object GDELT responses as parse failures", () => {
+    const adapter = adapterFor("gdelt");
+    const response = {
+      ...responseFor("rate limit exceeded"),
+      text: "rate limit exceeded",
+    };
+    const context = contextFor(adapter, query);
+    const failed = EngineResultSchema.parse(
+      adapter.parseResponse(response, context),
+    );
+
+    expect(failed.ok).toBe(false);
+    if (failed.ok) {
+      return;
+    }
+    expect(failed.error).toMatchObject({
+      kind: "parse",
+      status: 200,
+      retryable: false,
+    });
+    expect(failed.error).not.toHaveProperty("raw");
+    expect(failed.metadata).toMatchObject({ httpStatus: 200, rateLimit: null });
+    expect(failed.metadata).not.toHaveProperty("raw");
+
+    const withRaw = EngineResultSchema.parse(
+      adapter.parseResponse(response, { ...context, includeRaw: true }),
+    );
+    expect(withRaw.ok).toBe(false);
+    if (!withRaw.ok) {
+      expect(withRaw.error.raw).toBe("rate limit exceeded");
+      expect(withRaw.metadata.raw).toBe("rate limit exceeded");
+    }
+
+    const empty = EngineResultSchema.parse(
+      adapter.parseResponse(responseFor({ articles: [] }), context),
+    );
+    expect(empty.ok).toBe(true);
+    if (empty.ok) {
+      expect(empty.results).toEqual([]);
+    }
   });
 
   it("lets config.defaults override adapter request defaults", () => {
@@ -486,11 +528,6 @@ describe("adapter contract fixtures", () => {
 
     for (const { id, includeKey, excludeKey } of cases) {
       const adapter = adapterFor(id);
-      const expectedWarning = {
-        code: "provider_param_conflict",
-        message: expect.stringContaining("include"),
-        param: "excludeDomains",
-      };
       const scenarios = [
         {
           input: { ...query, includeDomains: ["query.example"] },
@@ -499,6 +536,8 @@ describe("adapter contract fixtures", () => {
             defaults: { [excludeKey]: ["default-blocked.example"] },
           }),
           expectedInclude: ["query.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
         },
         {
           input: {
@@ -508,6 +547,8 @@ describe("adapter contract fixtures", () => {
           },
           config: configFor(adapter),
           expectedInclude: ["query.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
         },
         {
           input: {
@@ -520,7 +561,48 @@ describe("adapter contract fixtures", () => {
             apiKey: "test-key",
             defaults: { [includeKey]: ["default.example"] },
           }),
-          expectedInclude: ["default.example"],
+          expectedInclude: undefined,
+          expectedExclude: ["override-blocked.example"],
+          dropped: includeKey,
+        },
+        {
+          input: {
+            ...query,
+            excludeDomains: ["query-blocked.example"],
+          },
+          config: adapter.configSchema.parse({
+            apiKey: "test-key",
+            defaults: { [includeKey]: ["default.example"] },
+          }),
+          expectedInclude: undefined,
+          expectedExclude: ["query-blocked.example"],
+          dropped: includeKey,
+        },
+        {
+          input: {
+            ...query,
+            excludeDomains: ["query-blocked.example"],
+            overrides: { [id]: { [includeKey]: ["override.example"] } },
+          },
+          config: configFor(adapter),
+          expectedInclude: ["override.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
+        },
+        {
+          input: {
+            ...query,
+            overrides: {
+              [id]: {
+                [includeKey]: ["override.example"],
+                [excludeKey]: ["override-blocked.example"],
+              },
+            },
+          },
+          config: configFor(adapter),
+          expectedInclude: ["override.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
         },
       ];
 
@@ -531,13 +613,182 @@ describe("adapter contract fixtures", () => {
           scenario.config,
           warnings,
         );
+        expect(request.method).toBe("POST");
+        expect(request.body).toBeDefined();
         const params = request.body as Record<string, unknown>;
 
         expect(params[includeKey]).toEqual(scenario.expectedInclude);
-        expect(params[excludeKey]).toBeUndefined();
-        expect(warnings).toEqual([expectedWarning]);
+        expect(params[excludeKey]).toEqual(scenario.expectedExclude);
+        expect(warnings).toEqual([
+          {
+            code: "provider_param_conflict",
+            message: expect.stringContaining("cannot combine"),
+            param: scenario.dropped,
+          },
+        ]);
       }
     }
+  });
+
+  it("preserves explicit domain unsets and omits invalid provider filters", () => {
+    for (const [id, includeKey, excludeKey] of [
+      ["firecrawl", "includeDomains", "excludeDomains"],
+      ["you", "include_domains", "exclude_domains"],
+    ] as const) {
+      const adapter = adapterFor(id);
+      const warnings: Warning[] = [];
+      const request = adapter.buildRequest(
+        {
+          query: "espresso",
+          excludeDomains: ["blocked.example"],
+          overrides: { [id]: { [includeKey]: undefined } },
+        },
+        adapter.configSchema.parse({
+          apiKey: "test-key",
+          defaults: { [includeKey]: ["default.example"] },
+        }),
+        warnings,
+      );
+      expect(request.method).toBe("POST");
+      expect(request.body).toBeDefined();
+      const params = request.body as Record<string, unknown>;
+      expect(params[includeKey]).toBeUndefined();
+      expect(params[excludeKey]).toEqual(["blocked.example"]);
+      expect(warnings).toEqual([]);
+
+      const invalidWarnings: Warning[] = [];
+      const invalid = adapter.buildRequest(
+        { query: "espresso", excludeDomains: ["blocked.example"] },
+        adapter.configSchema.parse({
+          apiKey: "test-key",
+          defaults: { [includeKey]: 42 },
+        }),
+        invalidWarnings,
+      );
+      expect(invalid.method).toBe("POST");
+      expect(invalid.body).toBeDefined();
+      const invalidParams = invalid.body as Record<string, unknown>;
+      expect(invalidParams[includeKey]).toBeUndefined();
+      expect(invalidParams[excludeKey]).toEqual(["blocked.example"]);
+      expect(invalidWarnings).toEqual([
+        {
+          code: "invalid_provider_param",
+          message: expect.stringContaining("omitted"),
+          param: includeKey,
+        },
+      ]);
+    }
+  });
+
+  it("uses You GET strings and converts them to arrays when POST is required", () => {
+    const adapter = adapterFor("you");
+    const config = adapter.configSchema.parse({
+      apiKey: "test-key",
+      defaults: { include_domains: "a.example, b.example" },
+    });
+    const getWarnings: Warning[] = [];
+    const getRequest = adapter.buildRequest(
+      { query: "espresso" },
+      config,
+      getWarnings,
+    );
+    expect(getRequest.method).toBe("GET");
+    expect(getRequest.query?.include_domains).toBe("a.example,b.example");
+    expect(getWarnings).toEqual([]);
+
+    const postWarnings: Warning[] = [];
+    const postRequest = adapter.buildRequest(
+      { query: "espresso", excludeDomains: [], includeContent: true },
+      config,
+      postWarnings,
+    );
+    expect(postRequest.method).toBe("POST");
+    expect(postRequest.body).toBeDefined();
+    expect(postRequest.body).toMatchObject({
+      include_domains: ["a.example", "b.example"],
+    });
+    expect(postWarnings).toEqual([]);
+
+    const conflictWarnings: Warning[] = [];
+    const conflict = adapter.buildRequest(
+      { query: "espresso" },
+      adapter.configSchema.parse({
+        apiKey: "test-key",
+        defaults: {
+          include_domains: "a.example",
+          exclude_domains: "b.example",
+        },
+      }),
+      conflictWarnings,
+    );
+    expect(conflict.method).toBe("GET");
+    expect(conflict.query?.include_domains).toBe("a.example");
+    expect(conflict.query?.exclude_domains).toBeUndefined();
+    expect(conflictWarnings).toEqual([
+      {
+        code: "provider_param_conflict",
+        message: expect.stringContaining("include_domains wins"),
+        param: "exclude_domains",
+      },
+    ]);
+  });
+
+  it("treats empty domain filters as absent and rejects malformed raw filters", () => {
+    const firecrawl = adapterFor("firecrawl");
+    const emptyWarnings: Warning[] = [];
+    const empty = firecrawl.buildRequest(
+      { query: "espresso", includeDomains: [] },
+      firecrawl.configSchema.parse({
+        apiKey: "test-key",
+        defaults: { includeDomains: "   ", excludeDomains: [] },
+      }),
+      emptyWarnings,
+    );
+    expect(empty.body).toMatchObject({
+      includeDomains: undefined,
+      excludeDomains: undefined,
+    });
+    expect(emptyWarnings).toEqual([]);
+
+    for (const invalidValue of ["a.example", ["a.example", " "]]) {
+      const warnings: Warning[] = [];
+      const request = firecrawl.buildRequest(
+        { query: "espresso" },
+        firecrawl.configSchema.parse({
+          apiKey: "test-key",
+          defaults: { includeDomains: invalidValue },
+        }),
+        warnings,
+      );
+      expect(request.body).toMatchObject({ includeDomains: undefined });
+      expect(warnings).toEqual([
+        {
+          code: "invalid_provider_param",
+          message: expect.stringContaining("omitted"),
+          param: "includeDomains",
+        },
+      ]);
+    }
+
+    const you = adapterFor("you");
+    const youWarnings: Warning[] = [];
+    const malformed = you.buildRequest(
+      { query: "espresso" },
+      you.configSchema.parse({
+        apiKey: "test-key",
+        defaults: { include_domains: "a.example,,b.example" },
+      }),
+      youWarnings,
+    );
+    expect(malformed.method).toBe("GET");
+    expect(malformed.query?.include_domains).toBeUndefined();
+    expect(youWarnings).toEqual([
+      {
+        code: "invalid_provider_param",
+        message: expect.stringContaining("omitted"),
+        param: "include_domains",
+      },
+    ]);
   });
 
   it("applies adapter request defaults when config.defaults is absent", () => {
@@ -641,8 +892,8 @@ describe("adapter contract fixtures", () => {
       expect(defaultWarnings).toEqual([
         {
           code: "clamped_param",
-          message: `${id} count was clamped to ${limit}`,
-          param: "count",
+          message: `${id} ${parameter} was clamped to ${limit}`,
+          param: parameter,
         },
       ]);
 
@@ -659,8 +910,8 @@ describe("adapter contract fixtures", () => {
       expect(overrideWarnings).toEqual([
         {
           code: "clamped_param",
-          message: `${id} count was clamped to ${limit}`,
-          param: "count",
+          message: `${id} ${parameter} was clamped to ${limit}`,
+          param: parameter,
         },
       ]);
 
@@ -676,6 +927,38 @@ describe("adapter contract fixtures", () => {
       );
       expect(overriddenLow.query?.[parameter]).toBe(limit - 1);
       expect(effectiveWarnings).toEqual([]);
+
+      for (const source of ["default", "override"] as const) {
+        const invalidWarnings: Warning[] = [];
+        const invalidValue = String(limit + 1);
+        const invalidInput =
+          source === "override"
+            ? {
+                ...query,
+                overrides: { [id]: { [parameter]: invalidValue } },
+              }
+            : query;
+        const invalidConfig =
+          source === "default"
+            ? adapter.configSchema.parse({
+                apiKey: "test-key",
+                defaults: { [parameter]: invalidValue },
+              })
+            : configFor(adapter);
+        const invalid = adapter.buildRequest(
+          invalidInput,
+          invalidConfig,
+          invalidWarnings,
+        );
+        expect(invalid.query?.[parameter]).toBeUndefined();
+        expect(invalidWarnings).toEqual([
+          {
+            code: "invalid_provider_param",
+            message: expect.stringContaining("omitted"),
+            param: parameter,
+          },
+        ]);
+      }
     }
   });
 

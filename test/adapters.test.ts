@@ -12,6 +12,32 @@ const jsonResponse = (body: unknown): Response =>
   });
 
 describe("built-in adapters", () => {
+  it("surfaces a plain-text GDELT HTTP 200 as a parse failure", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response("rate limit exceeded", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        }),
+    );
+    const client = createSearchClient(
+      { gdelt: {} },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search({ query: "news" });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(response.gdelt?.ok).toBe(false);
+    if (response.gdelt && !response.gdelt.ok) {
+      expect(response.gdelt.error).toMatchObject({
+        kind: "parse",
+        status: 200,
+        retryable: false,
+      });
+      expect(response.gdelt.metadata.httpStatus).toBe(200);
+    }
+  });
+
   it("honors Linkup count in strict unsupported-parameter mode", async () => {
     const fetch = vi.fn(async () =>
       jsonResponse({

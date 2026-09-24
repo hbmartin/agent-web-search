@@ -1,6 +1,7 @@
 import {
   asArray,
   clampWithWarning,
+  countWarningParam,
   dateRangeString,
   firstString,
   freshnessCode,
@@ -38,7 +39,7 @@ export const braveAdapter: EngineAdapter<KeyedEngineConfig> = {
       language: true,
       safeSearch: true,
     },
-    verticals: ["web", "news", "images", "video"],
+    verticals: ["web"],
   },
   buildRequest(input, config, warnings) {
     const query = withDomainOperators(
@@ -61,7 +62,12 @@ export const braveAdapter: EngineAdapter<KeyedEngineConfig> = {
     const params = mergeParams("brave", config, mapped, input.overrides);
     params.count = clampWithWarning(
       "brave",
-      "count",
+      countWarningParam(
+        "count",
+        input.count,
+        config.defaults,
+        input.overrides?.brave,
+      ),
       params.count,
       20,
       warnings,

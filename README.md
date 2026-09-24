@@ -323,7 +323,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full checklist to add a built-i
 
 | Engine     | answer | content | streaming | multi-query | count | dateRange | freshness | includeDomains | excludeDomains | country | language | safeSearch | verticals                  |
 | ---------- | :----: | :-----: | :-------: | :---------: | :---: | :-------: | :-------: | :------------: | :------------: | :-----: | :------: | :--------: | -------------------------- |
-| brave      |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web, news, images, video   |
+| brave      |   —    |    —    |     —     |      —      |   ✓   |     ✓     |     ✓     |   emulated     |    emulated    |    ✓    |    ✓     |     ✓      | web                        |
 | ceramic    |   —    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
 | duckduckgo |   ✓    |    —    |     —     |      —      |   —   |     —     |     —     |       —        |       —        |    —    |    —     |     —      | web                        |
 | exa        |   —    |    ✓    |     —     |      —      |   ✓   |     ✓     |     ✓     |    native      |    native      |    ✓    |    —     |     —      | web, news                  |

@@ -23,6 +23,7 @@ import type {
   Warning,
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
+import { resolveDomainFilters } from "./shared.js";
 
 const endpoint = "https://ydc-index.io/v1/search";
 
@@ -63,23 +64,25 @@ export const youAdapter: EngineAdapter<KeyedEngineConfig> = {
       ...(options ? livecrawlParams(options, warnings) : {}),
     };
     const merged = mergeParams("you", config, mapped, input.overrides);
-
-    if (
-      Array.isArray(merged.include_domains) &&
-      merged.include_domains.length > 0 &&
-      Array.isArray(merged.exclude_domains) &&
-      merged.exclude_domains.length > 0
-    ) {
-      merged.exclude_domains = undefined;
-      addWarning(
-        warnings,
-        "provider_param_conflict",
-        "you cannot combine include_domains and exclude_domains; include_domains wins",
-        "excludeDomains",
-      );
-    }
+    resolveDomainFilters({
+      engine: "you",
+      params: merged,
+      query: input,
+      config,
+      includeKey: "include_domains",
+      excludeKey: "exclude_domains",
+      allowCsvStrings: true,
+      warnings,
+    });
 
     const method = shouldPost(merged) ? "POST" : "GET";
+    if (method === "POST") {
+      for (const key of ["include_domains", "exclude_domains"]) {
+        if (typeof merged[key] === "string") {
+          merged[key] = merged[key].split(",");
+        }
+      }
+    }
 
     return {
       method,

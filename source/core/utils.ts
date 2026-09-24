@@ -51,11 +51,21 @@ export const clampWithWarning = (
   maximum: number,
   warnings: Warning[],
 ): unknown => {
-  if (
-    typeof value !== "number" ||
-    !Number.isFinite(value) ||
-    value <= maximum
-  ) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    addWarning(
+      warnings,
+      "invalid_provider_param",
+      `${engine} ${param} was omitted because it must be a finite number`,
+      param,
+    );
+    return undefined;
+  }
+
+  if (value <= maximum) {
     return value;
   }
 
@@ -67,6 +77,17 @@ export const clampWithWarning = (
   );
   return maximum;
 };
+
+export const countWarningParam = (
+  nativeParam: string,
+  normalizedCount: number | undefined,
+  defaults: Record<string, unknown> | undefined,
+  overrides: Record<string, unknown> | undefined,
+): string =>
+  Object.hasOwn(overrides ?? {}, nativeParam) ||
+  (normalizedCount === undefined && Object.hasOwn(defaults ?? {}, nativeParam))
+    ? nativeParam
+    : "count";
 
 export const safeHook = <K extends keyof TelemetryHooks>(
   hooks: TelemetryHooks | undefined,

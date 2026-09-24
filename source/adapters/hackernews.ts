@@ -1,6 +1,7 @@
 import {
   asArray,
   clampWithWarning,
+  countWarningParam,
   firstString,
   freshnessStartDate,
   isObject,
@@ -79,7 +80,12 @@ export const hackernewsAdapter: EngineAdapter = {
     };
     merged.hitsPerPage = clampWithWarning(
       "hackernews",
-      "count",
+      countWarningParam(
+        "hitsPerPage",
+        input.count,
+        config.defaults,
+        input.overrides?.hackernews,
+      ),
       merged.hitsPerPage,
       maxHitsPerPage,
       warnings,
@@ -178,7 +184,7 @@ const decodeHtmlEntity = (entity: string, encoded: string): string => {
     hexadecimal ? 16 : 10,
   );
   if (
-    (codePoint >= 0x00 && codePoint <= 0x1f) ||
+    (codePoint <= 0x1f && ![0x09, 0x0a, 0x0c, 0x0d].includes(codePoint)) ||
     (codePoint >= 0x7f && codePoint <= 0x9f) ||
     codePoint > 0x10_ff_ff ||
     (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff)

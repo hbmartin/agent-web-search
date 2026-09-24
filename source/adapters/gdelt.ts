@@ -1,9 +1,11 @@
 import {
   asArray,
   clampWithWarning,
+  countWarningParam,
   firstString,
   freshnessStartDate,
   isObject,
+  makeFailure,
   makeMetadata,
   makeResult,
   makeSuccess,
@@ -78,7 +80,12 @@ export const gdeltAdapter: EngineAdapter = {
     const merged = mergeParams("gdelt", config, mapped, input.overrides);
     merged.maxrecords = clampWithWarning(
       "gdelt",
-      "count",
+      countWarningParam(
+        "maxrecords",
+        input.count,
+        config.defaults,
+        input.overrides?.gdelt,
+      ),
       merged.maxrecords,
       maxRecords,
       warnings,
@@ -92,11 +99,28 @@ export const gdeltAdapter: EngineAdapter = {
   },
   parseResponse(response, ctx) {
     const raw = response.raw;
-    // GDELT answers malformed queries with plain text rather than JSON,
-    // which the transport surfaces as a string; treat that as no results.
-    const articles = isObject(raw)
-      ? asArray(raw.articles).filter(isObject)
-      : [];
+    if (!isObject(raw)) {
+      return makeFailure({
+        engine: ctx.engine,
+        error: {
+          kind: "parse",
+          message: "gdelt returned a non-object response for format=json",
+          status: response.status,
+          retryable: false,
+          ...(ctx.includeRaw ? { raw } : {}),
+        },
+        metadata: makeMetadata({
+          engine: ctx.engine,
+          latencyMs: ctx.latencyMs,
+          httpStatus: ctx.httpStatus,
+          rateLimit: ctx.rateLimit,
+          warnings: ctx.warnings,
+          raw,
+          includeRaw: ctx.includeRaw,
+        }),
+      });
+    }
+    const articles = asArray(raw.articles).filter(isObject);
     const results = articles
       .map((item) =>
         makeResult({

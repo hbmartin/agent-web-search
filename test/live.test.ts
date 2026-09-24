@@ -112,9 +112,6 @@ describe.skipIf(!live)("live provider integration", () => {
         `gdelt failed live: ${result?.error.kind} — ${result?.error.message}`,
       );
     }
-    if (typeof result.raw === "string") {
-      throw new Error(`gdelt returned plain text: ${result.raw.slice(0, 500)}`);
-    }
     expect(result.results.length).toBeGreaterThan(0);
     for (const item of result.results) {
       expect(item.url).toMatch(/^https?:\/\//);

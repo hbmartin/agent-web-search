@@ -8,6 +8,15 @@ Across all adapters, configured provider defaults are now preserved when the
 corresponding normalized query value is absent. Defined normalized values still
 override defaults, and per-request overrides remain the highest-precedence
 layer, including an explicit `undefined` to unset a configured default.
+Firecrawl and You domain-filter conflicts follow that same precedence, with
+include winning a tie. Invalid provider-native domain filters are omitted with
+a warning; You's comma-separated GET filters remain supported.
+
+Brave reports web search as its supported vertical and keeps the web endpoint's
+20-result cap. Brave, GDELT, and Hacker News omit invalid provider-native count
+values with a warning; clamp warnings name the parameter that supplied the
+effective count. GDELT reports non-object success responses as parse failures,
+and Hacker News decodes numeric whitespace entities in snippets.
 
 - **Linkup** (`linkup`, `LINKUP_API_KEY`) — an independent commercial index with
   native include/exclude domain filters and native date-range filtering. Defaults
