@@ -27,31 +27,63 @@ type DomainFilter = string[] | string | undefined;
 const normalizeDomainFilter = (
   value: unknown,
   allowCsvStrings: boolean,
-): { value: DomainFilter; invalid: boolean } => {
-  if (value === undefined || (Array.isArray(value) && value.length === 0)) {
-    return { value: undefined, invalid: false };
-  }
-
-  if (typeof value === "string" && value.trim().length === 0) {
-    return { value: undefined, invalid: false };
+  source: string,
+): DomainFilter => {
+  if (value === undefined || value === null) {
+    return undefined;
   }
 
   if (Array.isArray(value)) {
-    return value.every(
-      (domain) => typeof domain === "string" && domain.trim().length > 0,
-    )
-      ? { value: value as string[], invalid: false }
-      : { value: undefined, invalid: true };
-  }
-
-  if (allowCsvStrings && typeof value === "string") {
+    if (value.length === 0) {
+      return undefined;
+    }
+    if (value.every((domain) => typeof domain === "string" && domain.trim())) {
+      return value.map((domain: string) => domain.trim());
+    }
+  } else if (allowCsvStrings && typeof value === "string") {
     const domains = value.split(",").map((domain) => domain.trim());
-    return domains.every((domain) => domain.length > 0)
-      ? { value: domains.join(","), invalid: false }
-      : { value: undefined, invalid: true };
+    if (domains.every(Boolean)) {
+      return domains.join(",");
+    }
   }
 
-  return { value: undefined, invalid: true };
+  throw new TypeError(
+    `${source} must contain nonblank domains${allowCsvStrings ? " or a comma-separated domain string" : " in an array"}`,
+  );
+};
+
+const nativeDomainRules: Record<
+  string,
+  { keys: readonly string[]; allowCsvStrings: boolean }
+> = {
+  firecrawl: {
+    keys: ["includeDomains", "excludeDomains"],
+    allowCsvStrings: false,
+  },
+  you: {
+    keys: ["include_domains", "exclude_domains"],
+    allowCsvStrings: true,
+  },
+};
+
+export const validateConfiguredDomains = (
+  engine: string,
+  params: Record<string, unknown> | undefined,
+  source: string,
+): void => {
+  const rule = nativeDomainRules[engine];
+  if (!rule) {
+    return;
+  }
+  for (const key of rule.keys) {
+    if (Object.hasOwn(params ?? {}, key)) {
+      normalizeDomainFilter(
+        params?.[key],
+        rule.allowCsvStrings,
+        `${engine} ${source}.${key}`,
+      );
+    }
+  }
 };
 
 /** Resolve mutually exclusive native filters without losing source precedence. */
@@ -70,16 +102,11 @@ export const resolveDomainFilters = (input: {
   const allowCsvStrings = input.allowCsvStrings ?? false;
 
   for (const key of [includeKey, excludeKey]) {
-    const normalized = normalizeDomainFilter(params[key], allowCsvStrings);
-    params[key] = normalized.value;
-    if (normalized.invalid) {
-      addWarning(
-        warnings,
-        "invalid_provider_param",
-        `${engine} ${key} was omitted because it is not a valid domain filter`,
-        key,
-      );
-    }
+    params[key] = normalizeDomainFilter(
+      params[key],
+      allowCsvStrings,
+      `${engine} ${key}`,
+    );
   }
 
   if (params[includeKey] === undefined || params[excludeKey] === undefined) {
@@ -105,10 +132,21 @@ export const resolveDomainFilters = (input: {
   const winner = includeWins ? includeKey : excludeKey;
   const dropped = includeWins ? excludeKey : includeKey;
   params[dropped] = undefined;
+  const fromOverride = Object.hasOwn(overrides ?? {}, dropped);
+  const fromQuery =
+    !fromOverride &&
+    (dropped === includeKey
+      ? query.includeDomains !== undefined
+      : query.excludeDomains !== undefined);
+  const warningParam = fromQuery
+    ? dropped === includeKey
+      ? "includeDomains"
+      : "excludeDomains"
+    : dropped;
   addWarning(
     warnings,
     "provider_param_conflict",
     `${engine} cannot combine ${includeKey} and ${excludeKey}; ${winner} wins`,
-    dropped,
+    warningParam,
   );
 };

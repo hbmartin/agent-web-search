@@ -44,50 +44,55 @@ export const addWarning = (
   warnings.push(param ? { code, message, param } : { code, message });
 };
 
-export const clampWithWarning = (
-  engine: string,
-  param: string,
-  value: unknown,
-  maximum: number,
-  warnings: Warning[],
-): unknown => {
-  if (value === undefined) {
-    return undefined;
-  }
+interface CountRule {
+  param: string;
+  max?: number;
+}
 
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    addWarning(
-      warnings,
-      "invalid_provider_param",
-      `${engine} ${param} was omitted because it must be a finite number`,
-      param,
-    );
-    return undefined;
-  }
-
-  if (value <= maximum) {
-    return value;
-  }
-
-  addWarning(
-    warnings,
-    "clamped_param",
-    `${engine} ${param} was clamped to ${maximum}`,
-    param,
-  );
-  return maximum;
+// Native count fields are validated even when supplied through raw defaults or
+// overrides. A missing max means the provider has no documented cap here.
+const providerCountRules: Record<string, CountRule> = {
+  brave: { param: "count", max: 20 },
+  exa: { param: "numResults", max: 100 },
+  firecrawl: { param: "limit", max: 100 },
+  gdelt: { param: "maxrecords", max: 250 },
+  hackernews: { param: "hitsPerPage", max: 1000 },
+  jina: { param: "num" },
+  kagi: { param: "limit" },
+  linkup: { param: "maxResults" },
+  parallel: { param: "max_results" },
+  serpapi: { param: "num" },
+  serper: { param: "num" },
+  tavily: { param: "max_results", max: 20 },
+  you: { param: "count" },
 };
 
-export const countWarningParam = (
-  nativeParam: string,
-  normalizedCount: number | undefined,
-  defaults: Record<string, unknown> | undefined,
-  overrides: Record<string, unknown> | undefined,
-): string =>
-  Object.hasOwn(overrides ?? {}, nativeParam) ||
-  (normalizedCount === undefined && Object.hasOwn(defaults ?? {}, nativeParam))
-    ? nativeParam
-    : "count";
+const positiveIntegerCount = (
+  value: unknown,
+  source: string,
+): number | undefined => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new TypeError(`${source} must be a positive integer`);
+  }
+  return value;
+};
+
+export const validateConfiguredCount = (
+  engine: string,
+  params: Record<string, unknown> | undefined,
+  source: string,
+): void => {
+  const rule = providerCountRules[engine];
+  if (rule && Object.hasOwn(params ?? {}, rule.param)) {
+    positiveIntegerCount(
+      params?.[rule.param],
+      `${engine} ${source}.${rule.param}`,
+    );
+  }
+};
 
 export const safeHook = <K extends keyof TelemetryHooks>(
   hooks: TelemetryHooks | undefined,
@@ -386,16 +391,46 @@ export const mergeParams = (
   config: EngineConfig,
   mapped: Record<string, unknown>,
   overrides: Record<string, Record<string, unknown>> | undefined,
+  warnings: Warning[] = [],
 ): Record<string, unknown> => {
   const definedMapped = Object.fromEntries(
     Object.entries(mapped).filter(([, value]) => value !== undefined),
   );
 
-  return {
+  const merged: Record<string, unknown> = {
     ...(config.defaults ?? {}),
     ...definedMapped,
     ...(overrides?.[engine] ?? {}),
   };
+
+  const rule = providerCountRules[engine];
+  if (rule && Object.hasOwn(merged, rule.param)) {
+    const fromOverride = Object.hasOwn(overrides?.[engine] ?? {}, rule.param);
+    const fromQuery = !fromOverride && Object.hasOwn(definedMapped, rule.param);
+    const source = fromOverride
+      ? `overrides.${engine}.${rule.param}`
+      : fromQuery
+        ? "count"
+        : `defaults.${rule.param}`;
+    const count = positiveIntegerCount(
+      merged[rule.param],
+      `${engine} ${source}`,
+    );
+    if (count !== undefined && rule.max !== undefined && count > rule.max) {
+      const warningParam = fromQuery ? "count" : rule.param;
+      merged[rule.param] = rule.max;
+      addWarning(
+        warnings,
+        "clamped_param",
+        `${engine} ${warningParam} was clamped to ${rule.max}`,
+        warningParam,
+      );
+    } else {
+      merged[rule.param] = count;
+    }
+  }
+
+  return merged;
 };
 
 export const isObject = (value: unknown): value is Record<string, unknown> =>

@@ -108,8 +108,13 @@ describe.skipIf(!live)("live provider integration", () => {
     const result = response.gdelt;
     expect(result).toBeDefined();
     if (!result?.ok) {
+      const raw = result?.error.raw ?? result?.metadata.raw;
+      const excerpt =
+        typeof raw === "string"
+          ? raw.replaceAll(/\s+/g, " ").slice(0, 500)
+          : "";
       throw new Error(
-        `gdelt failed live: ${result?.error.kind} — ${result?.error.message}`,
+        `gdelt failed live: ${result?.error.kind} — ${result?.error.message}${excerpt ? `; response: ${excerpt}` : ""}`,
       );
     }
     expect(result.results.length).toBeGreaterThan(0);

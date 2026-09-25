@@ -66,6 +66,26 @@ describe("execution strategies", () => {
     expect(response.exa?.ok).toBe(true);
   });
 
+  it("fallback continues after a GDELT plain-text error", async () => {
+    const fetch = vi.fn(async (url: string | URL | Request) =>
+      String(url).includes("gdeltproject")
+        ? new Response("Invalid query syntax", { status: 200 })
+        : jsonResponse(okBody),
+    );
+    const client = createSearchClient(
+      { gdelt: { maxRetries: 0 }, exa: { apiKey: "exa-key" } },
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    const response = await client.search(
+      { query: "espresso" },
+      { strategy: "fallback", order: ["gdelt", "exa"] },
+    );
+    expect(response.gdelt?.ok).toBe(false);
+    expect(response.exa?.ok).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("fallback deduplicates repeated order entries", async () => {
     const seenUrls: string[] = [];
     const fetch = vi.fn(

@@ -12,7 +12,7 @@ const jsonResponse = (body: unknown): Response =>
   });
 
 describe("built-in adapters", () => {
-  it("surfaces a plain-text GDELT HTTP 200 as a parse failure", async () => {
+  it("surfaces an exhausted plain-text GDELT rate limit", async () => {
     const fetch = vi.fn(
       async () =>
         new Response("rate limit exceeded", {
@@ -21,19 +21,20 @@ describe("built-in adapters", () => {
         }),
     );
     const client = createSearchClient(
-      { gdelt: {} },
+      { gdelt: { retry: { initialDelayMs: 0, jitter: false } } },
       { fetch: fetch as typeof globalThis.fetch },
     );
 
     const response = await client.search({ query: "news" });
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(response.gdelt?.ok).toBe(false);
     if (response.gdelt && !response.gdelt.ok) {
       expect(response.gdelt.error).toMatchObject({
-        kind: "parse",
+        kind: "rate_limit",
         status: 200,
-        retryable: false,
+        retryable: true,
       });
+      expect(response.gdelt.error.message).toContain("rate limit exceeded");
       expect(response.gdelt.metadata.httpStatus).toBe(200);
     }
   });

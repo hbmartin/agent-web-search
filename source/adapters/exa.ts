@@ -64,7 +64,7 @@ export const exaAdapter: EngineAdapter<KeyedEngineConfig> = {
       method: "POST",
       url: config.baseUrl ?? endpoint,
       headers: { "x-api-key": config.apiKey },
-      body: mergeParams("exa", config, mapped, input.overrides),
+      body: mergeParams("exa", config, mapped, input.overrides, warnings),
     };
   },
   parseResponse(response, ctx) {

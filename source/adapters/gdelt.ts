@@ -1,7 +1,5 @@
 import {
   asArray,
-  clampWithWarning,
-  countWarningParam,
   firstString,
   freshnessStartDate,
   isObject,
@@ -19,8 +17,10 @@ import { withDomainOperators } from "./shared.js";
 
 const endpoint = "https://api.gdeltproject.org/api/v2/doc/doc";
 
-// GDELT caps ArtList at 250 records per request.
-const maxRecords = 250;
+const rateLimitNotice =
+  /\b(?:rate[\s-]*limit(?:ed|ing|s)?|too many (?:requests|queries)|limit of \d+ (?:requests|queries))\b/i;
+const queryErrorNotice =
+  /\b(?:syntax error|invalid query|malformed query|query (?:syntax|must|requires|cannot|was too short|is invalid|was invalid)|invalid (?:operator|term)|a maximum of \d+ records)\b/i;
 
 /**
  * GDELT 2.0 Document API. Keyless and free, covering global news in 65+
@@ -77,17 +77,11 @@ export const gdeltAdapter: EngineAdapter = {
       startdatetime: gdeltDateTime(start, "000000"),
       enddatetime: gdeltDateTime(input.dateRange?.end, "235959"),
     };
-    const merged = mergeParams("gdelt", config, mapped, input.overrides);
-    merged.maxrecords = clampWithWarning(
+    const merged = mergeParams(
       "gdelt",
-      countWarningParam(
-        "maxrecords",
-        input.count,
-        config.defaults,
-        input.overrides?.gdelt,
-      ),
-      merged.maxrecords,
-      maxRecords,
+      config,
+      mapped,
+      input.overrides,
       warnings,
     );
 
@@ -100,13 +94,25 @@ export const gdeltAdapter: EngineAdapter = {
   parseResponse(response, ctx) {
     const raw = response.raw;
     if (!isObject(raw)) {
+      const excerpt =
+        typeof raw === "string"
+          ? raw.replaceAll(/\s+/g, " ").trim().slice(0, 500)
+          : "";
+      const kind =
+        excerpt && !/^[[{]/.test(excerpt) && rateLimitNotice.test(excerpt)
+          ? "rate_limit"
+          : excerpt && !/^[[{]/.test(excerpt) && queryErrorNotice.test(excerpt)
+            ? "bad_request"
+            : "parse";
       return makeFailure({
         engine: ctx.engine,
         error: {
-          kind: "parse",
-          message: "gdelt returned a non-object response for format=json",
+          kind,
+          message: excerpt
+            ? `gdelt: ${excerpt}`
+            : "gdelt returned an empty or non-object response for format=json",
           status: response.status,
-          retryable: false,
+          retryable: kind === "rate_limit",
           ...(ctx.includeRaw ? { raw } : {}),
         },
         metadata: makeMetadata({

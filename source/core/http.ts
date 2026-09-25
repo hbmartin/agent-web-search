@@ -263,7 +263,7 @@ export const executeWithRetries = async (input: {
       });
 
       if (response.ok) {
-        return input.parse(
+        const parsed = input.parse(
           {
             status: response.status,
             headers: response.headers,
@@ -274,6 +274,29 @@ export const executeWithRetries = async (input: {
           Date.now() - start,
           rateLimit,
         );
+        if (
+          parsed.ok ||
+          !shouldRetry(
+            parsed.error,
+            attempt,
+            maxRetries,
+            input.config.retry?.retryStatuses,
+          )
+        ) {
+          return parsed;
+        }
+
+        cleanupAttempt();
+        await delayForRetry({
+          attempt,
+          error: parsed.error,
+          response,
+          retryPolicy,
+          hooks: input.hooks,
+          engine: input.engine,
+          signal: input.signal,
+        });
+        continue;
       }
 
       const error = classifyHttpError(

@@ -56,7 +56,13 @@ export const firecrawlAdapter: EngineAdapter<KeyedEngineConfig> = {
       excludeDomains: input.excludeDomains,
       scrapeOptions: options ? scrapeOptions(options, warnings) : undefined,
     };
-    const merged = mergeParams("firecrawl", config, mapped, input.overrides);
+    const merged = mergeParams(
+      "firecrawl",
+      config,
+      mapped,
+      input.overrides,
+      warnings,
+    );
     resolveDomainFilters({
       engine: "firecrawl",
       params: merged,

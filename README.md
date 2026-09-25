@@ -97,6 +97,8 @@ const response = await client.search({ query: "what is a vector database" });
 
 `search()` and `searchStream()` are one-shot convenience wrappers that build a client per call. Prefer `createSearchClient` when you issue more than one search — the cost budget and rate-limit state also live on the client.
 
+Engine `defaults` are overridable: normalized query fields take precedence when supplied, and `overrides` take precedence over both. Domain filters must contain nonblank entries. Firecrawl's native `includeDomains` and `excludeDomains` defaults or overrides must be arrays; You also accepts comma-separated native GET filters. Invalid native defaults reject client creation, and invalid selected-engine overrides reject a search before any provider request. Native count values must be positive integers (numeric strings are rejected). Counts above a documented provider limit are clamped with a warning.
+
 ### Aggregation: one deduplicated, rank-fused list
 
 `aggregate()` merges a multi-engine response into a single result list. URLs are canonicalized for deduplication (protocol, `www.`, fragments, trailing slashes, and tracking params like `utm_*`/`gclid`/`fbclid` are ignored) and ordered by [reciprocal rank fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf): each engine contributes `weight / (k + rank)`, so results that several engines agree on rise to the top.
