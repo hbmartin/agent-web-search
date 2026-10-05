@@ -5,7 +5,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   numberOrNull,
   queryParams,
@@ -14,11 +13,16 @@ import {
 import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
 
+import { createParamsSchema, mergeAdapterParams } from "./shared.js";
+
 const endpoint = "https://kagi.com/api/v0/search";
+
+const countRule = { param: "limit" };
 
 export const kagiAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "kagi",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({ count: countRule }),
   capabilities: {
     answer: false,
     content: false,
@@ -47,8 +51,15 @@ export const kagiAdapter: EngineAdapter<KeyedEngineConfig> = {
       url: config.baseUrl ?? endpoint,
       headers: { Authorization: `Bot ${config.apiKey}` },
       query: queryParams(
-        "kagi",
-        mergeParams("kagi", config, mapped, input.overrides),
+        this.id,
+        mergeAdapterParams(
+          this,
+          config,
+          mapped,
+          input.overrides,
+          warnings,
+          countRule,
+        ),
         warnings,
       ),
     };

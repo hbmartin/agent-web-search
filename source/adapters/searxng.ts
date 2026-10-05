@@ -8,7 +8,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   numberOrNull,
   queryParams,
@@ -16,7 +15,7 @@ import {
 } from "../core/utils.js";
 import type { Answer, EngineAdapter } from "../types/index.js";
 import { EngineConfigSchema } from "../types/index.js";
-import { withDomainOperators } from "./shared.js";
+import { mergeAdapterParams, withDomainOperators } from "./shared.js";
 
 export const SearxngConfigSchema = EngineConfigSchema.extend({
   // Self-hosted: the instance URL is required, an API key is not.
@@ -72,8 +71,8 @@ export const searxngAdapter: EngineAdapter<SearxngConfig> = {
         ? { Authorization: `Bearer ${config.apiKey}` }
         : undefined,
       query: queryParams(
-        "searxng",
-        mergeParams("searxng", config, mapped, input.overrides),
+        this.id,
+        mergeAdapterParams(this, config, mapped, input.overrides, warnings),
         warnings,
       ),
     };

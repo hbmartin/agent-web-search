@@ -97,7 +97,31 @@ const response = await client.search({ query: "what is a vector database" });
 
 `search()` and `searchStream()` are one-shot convenience wrappers that build a client per call. Prefer `createSearchClient` when you issue more than one search — the cost budget and rate-limit state also live on the client.
 
-Engine `defaults` are overridable: normalized query fields take precedence when supplied, and `overrides` take precedence over both. Domain filters must contain nonblank entries. Firecrawl's native `includeDomains` and `excludeDomains` defaults or overrides must be arrays; You also accepts comma-separated native GET filters. Invalid native defaults reject client creation, and invalid selected-engine overrides reject a search before any provider request. Native count values must be positive integers (numeric strings are rejected). Counts above a documented provider limit are clamped with a warning.
+Engine `defaults` are overridable: normalized query fields take precedence when supplied, and `overrides` take precedence over both. For Firecrawl and You, a nonempty include filter wins a conflict with an exclude filter, with a warning. To use only an exclude filter, explicitly clear the include filter. Empty normalized domain arrays (`[]`) **clear configured defaults**; omit the field to inherit the default. Null, undefined, and empty provider-native filters also clear that field. You accepts comma-separated native filters, including an empty string as unset.
+
+Native filters are validated and trimmed for Firecrawl, You, Tavily, Exa, Linkup, Parallel, and Sonar. Blank entries, sparse arrays, and invalid native defaults reject client creation; invalid selected-engine overrides reject a search before any provider request. Native count values must be safe integers (numeric strings are rejected). Tavily's `max_results` and Hacker News's `hitsPerPage` permit zero; normalized `count` remains positive. Counts above documented provider caps are clamped with a warning, except that an explicit Exa `numResults` override can exceed 100 for accounts with a negotiated limit. Parallel's native count belongs in `advanced_settings.max_results`; that container and its `source_policy` merge by leaf.
+
+Sonar combines include and exclude domains in `search_domain_filter`, preserving exclusion prefixes such as `-blocked.example`. Supplying either normalized domain field replaces that combined default using the supplied fields; an empty array without another nonempty domain field clears it. Parallel merges defined query mappings by leaf, while explicit null or undefined native overrides clear the corresponding leaf or container. Other adapters use ordinary shallow merging.
+
+```ts
+// Retain a configured include filter by omitting includeDomains.
+await client.search({ query: "release notes" });
+
+// Explicitly clear the include filter before using an exclude-only filter.
+await client.search({
+  query: "release notes",
+  includeDomains: [],
+  excludeDomains: ["blocked.example"],
+});
+
+// Exa accounts with a negotiated higher limit can use a raw override.
+await client.search({
+  query: "release notes",
+  overrides: { exa: { numResults: 200 } },
+});
+```
+
+`search()` always returns a promise, including for invalid client configuration. `createSearchClient()` still throws synchronously for invalid configuration, and `searchStream()` validates its input before returning the iterable.
 
 ### Aggregation: one deduplicated, rank-fused list
 
@@ -135,10 +159,11 @@ const block = formatForLLM(response, {
   format: "markdown",   // or "xml"
   maxResults: 8,
   maxSnippetChars: 400,
+  includeWarnings: true, // default; set false to omit provider warnings
 });
 ```
 
-Markdown output has an `## Answers` section (when engines produced answers) and a numbered `## Search results` list with title, date, URL, snippet, and source engines. XML output emits `<search_results>` with `<answer>` and `<result>` elements, fully escaped.
+Markdown output includes answers, engine errors, provider warnings, and a numbered search result list with title, date, URL, snippet, and source engines. Empty answer, error, and warning sections are omitted. XML emits fully escaped `<answer>`, `<engine_error>`, `<engine_warning>`, and `<result>` elements within `<search_results>`. Warnings are deduplicated per engine and preserved by `aggregate()` in its optional `warnings` field. Set `includeWarnings: false` for the previous warning-free formatting.
 
 ### Agent tool definitions
 
@@ -221,18 +246,27 @@ const client = createSearchClient(
   },
   {
     respectRateLimits: true,        // fail fast while a provider reports remaining: 0
-    budget: { maxCostUsd: 1 },      // hard ceiling across all searches on this client
+    budget: { maxCostUsd: 1 },      // ceiling on spent cost + reserved estimates
   },
 );
 ```
 
-- `throttle.maxConcurrent` caps in-flight requests per engine; `minIntervalMs` spaces request starts.
+- `throttle.maxConcurrent` caps in-flight requests through response-body consumption; `minIntervalMs` spaces **every attempt**, including retries and native streaming fetches. Concurrency slots are released during retry backoff.
 - With `respectRateLimits: true`, an engine whose last response reported an exhausted rate limit fails fast with a `rate_limit` error until the provider-reported reset time, instead of burning a request.
-- The budget accrues provider-reported costs (`usage.costUsd`, e.g. Exa) or your `costPerRequestUsd` estimate; once reached, engines fail fast with a `quota` error.
+- Before each attempt, the client atomically reserves `costPerRequestUsd` and rejects requests whose estimate would exceed the remaining budget with a `quota` error. Reservations include concurrent requests and retries, and reconcile to provider-reported costs (`usage.costUsd`, e.g. Exa) afterward. Failed or cancelled dispatched requests retain their estimate; cancellation before dispatch costs nothing.
+- Engines without an estimate reserve zero and use reported costs afterward. This is best-effort accounting: unestimated requests and actual charges above estimates can exceed the configured ceiling. Provide estimates, including `0` for free engines, when you need predictable admission. For example, a $1 budget with a $0.60 estimate now permits one request, rather than two.
+
+### Retries and adapter failures
+
+HTTP 429 and retryable upstream errors use `maxRetries` (default 2) and exponential backoff. `retry.retryStatuses` filters non-2xx HTTP retries; it does not filter network failures or opted-in parsed failures. `maxRetries: 0` disables retries.
+
+A custom adapter's retryable failure returned from a 2xx response is retried only when the adapter sets `retryParsedFailures: true`; the default is false. GDELT opts in for recognized plain-text rate-limit notices, including “Please limit requests to one every 5 seconds.” Query errors are non-retryable `bad_request` failures, and unknown non-object bodies are `parse` failures. Setting `retryStatuses: [429]` no longer suppresses GDELT's opted-in 2xx retries.
+
+Thrown request builders or serialization errors become per-engine, non-retryable `bad_request` failures. Thrown parsers become non-retryable `parse` failures with their original cause and HTTP metadata. These failures are isolated under every strategy, so another engine's result can still succeed.
 
 ### Streaming
 
-`searchStream` yields events as each engine produces them. Engines that support native streaming (e.g. Sonar) emit `answer_delta` events; non-streaming engines emit their terminal events when they complete.
+`searchStream` yields events as each engine produces them. Native streams use the same cost reservations, pacing, concurrency, and network timeout as ordinary fetches; emitted streams are never automatically replayed. Engines that support native streaming (e.g. Sonar) emit `answer_delta` events; non-streaming engines emit their terminal events when they complete.
 
 ```ts
 import { searchStream } from "agent-web-search";
@@ -289,7 +323,7 @@ controller.abort();
 
 ### Custom engines
 
-Implement an `EngineAdapter` and register it via `options.adapters`. `defineEngine` is an identity helper that preserves config types.
+Implement an `EngineAdapter` and register it via `options.adapters`. `defineEngine` is an identity helper that preserves config types. The optional `paramsSchema` validates partial provider-native defaults and overrides; use a pass-through schema to preserve unknown provider fields. Validation belongs to the adapter instance, so a custom adapter replacing a built-in id inherits no built-in rules. Set `retryParsedFailures: true` only when your parser returns failures that can safely trigger another provider request.
 
 ```ts
 import { createSearchClient, defineEngine, KeyedEngineConfigSchema } from "agent-web-search";
@@ -310,6 +344,19 @@ const client = createSearchClient(
   { "my-engine": { apiKey: "..." } },
   { adapters: [myAdapter] },
 );
+```
+
+A built-in adapter can be registered under another id by copying it. Overrides use the registered id:
+
+```ts
+import { braveAdapter } from "agent-web-search/adapters/brave";
+
+const braveEU = { ...braveAdapter, id: "brave-eu" };
+const client = createSearchClient(
+  { "brave-eu": { apiKey: "...", defaults: { country: "DE" } } },
+  { adapters: [braveEU] },
+);
+await client.search({ query: "news", overrides: { "brave-eu": { count: 10 } } });
 ```
 
 You can also import the built-in adapters individually:

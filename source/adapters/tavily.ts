@@ -6,7 +6,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   numberOrNull,
   singleQuery,
   truncateContent,
@@ -20,11 +19,19 @@ import type {
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
 
+import { createParamsSchema, mergeAdapterParams } from "./shared.js";
+
 const endpoint = "https://api.tavily.com/search";
+
+const countRule = { param: "max_results", min: 0, max: 20 };
 
 export const tavilyAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "tavily",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({
+    count: countRule,
+    domains: { include_domains: false, exclude_domains: false },
+  }),
   capabilities: {
     answer: true,
     content: true,
@@ -64,7 +71,14 @@ export const tavilyAdapter: EngineAdapter<KeyedEngineConfig> = {
       method: "POST",
       url: config.baseUrl ?? endpoint,
       headers: { Authorization: `Bearer ${config.apiKey}` },
-      body: mergeParams("tavily", config, mapped, input.overrides, warnings),
+      body: mergeAdapterParams(
+        this,
+        config,
+        mapped,
+        input.overrides,
+        warnings,
+        countRule,
+      ),
     };
   },
   parseResponse(response, ctx) {

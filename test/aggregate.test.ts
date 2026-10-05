@@ -316,3 +316,70 @@ describe("formatForLLM", () => {
     expect(text).toContain("abcdef");
   });
 });
+
+describe("provider warnings in LLM output", () => {
+  it("aggregates warnings from successful and failed engines without duplicates", () => {
+    const warning = {
+      code: "provider_param_conflict",
+      param: "excludeDomains",
+      message: "firecrawl: includeDomains wins",
+    };
+    const ok = success("firecrawl", []);
+    ok.metadata.warnings = [warning, { ...warning }];
+    const failed: EngineResult = {
+      ok: false,
+      engine: "exa",
+      error: {
+        kind: "parse",
+        message: "unexpected response",
+        status: 200,
+        retryable: false,
+      },
+      metadata: {
+        ...ok.metadata,
+        engine: "exa",
+        warnings: [
+          {
+            code: "clamped_param",
+            param: "count",
+            message: "exa count was clamped to 100",
+          },
+        ],
+      },
+    };
+    const response = { firecrawl: ok, exa: failed };
+    const aggregated = aggregate(response);
+    expect(aggregated.warnings).toEqual({
+      firecrawl: [warning],
+      exa: failed.metadata.warnings,
+    });
+    const markdown = formatForLLM(response);
+    expect(markdown).toContain("## Engine warnings");
+    expect(markdown.match(/firecrawl: includeDomains wins/g)).toHaveLength(1);
+    expect(markdown).toContain("clamped_param (count)");
+    expect(formatForLLM(aggregated, { includeWarnings: false })).not.toContain(
+      "Engine warnings",
+    );
+  });
+
+  it("escapes warning XML, deduplicates pre-aggregated warnings, and supports omission", () => {
+    const warning = {
+      code: "changed&param",
+      param: 'count"',
+      message: "<Changed>",
+    };
+    const aggregated = aggregate({ custom: success("custom", []) });
+    aggregated.warnings = { custom: [warning, warning] };
+    const xml = formatForLLM(aggregated, { format: "xml" });
+    expect(xml.match(/<engine_warning /g)).toHaveLength(1);
+    expect(xml).toContain(
+      'code="changed&amp;param" param="count&quot;">&lt;Changed&gt;</engine_warning>',
+    );
+    expect(
+      formatForLLM(aggregated, { format: "xml", includeWarnings: false }),
+    ).not.toContain("engine_warning");
+    expect(formatForLLM({ custom: success("custom", []) })).not.toContain(
+      "Engine warnings",
+    );
+  });
+});

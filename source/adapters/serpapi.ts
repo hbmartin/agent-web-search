@@ -7,7 +7,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   numberOrNull,
   queryParams,
@@ -15,13 +14,20 @@ import {
 } from "../core/utils.js";
 import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
-import { withDomainOperators } from "./shared.js";
+import {
+  createParamsSchema,
+  mergeAdapterParams,
+  withDomainOperators,
+} from "./shared.js";
 
 const endpoint = "https://serpapi.com/search.json";
+
+const countRule = { param: "num" };
 
 export const serpapiAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "serpapi",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({ count: countRule }),
   capabilities: {
     answer: false,
     content: false,
@@ -65,8 +71,15 @@ export const serpapiAdapter: EngineAdapter<KeyedEngineConfig> = {
       method: "GET",
       url: config.baseUrl ?? endpoint,
       query: queryParams(
-        "serpapi",
-        mergeParams("serpapi", config, mapped, input.overrides),
+        this.id,
+        mergeAdapterParams(
+          this,
+          config,
+          mapped,
+          input.overrides,
+          warnings,
+          countRule,
+        ),
         warnings,
       ),
     };

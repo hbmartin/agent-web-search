@@ -6,7 +6,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   numberOrNull,
   singleQuery,
@@ -17,13 +16,20 @@ import type {
   KeyedEngineConfig,
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
-import { withDomainOperators } from "./shared.js";
+import {
+  createParamsSchema,
+  mergeAdapterParams,
+  withDomainOperators,
+} from "./shared.js";
 
 const endpoint = "https://google.serper.dev/search";
+
+const countRule = { param: "num" };
 
 export const serperAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "serper",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({ count: countRule }),
   capabilities: {
     answer: false,
     content: false,
@@ -41,7 +47,7 @@ export const serperAdapter: EngineAdapter<KeyedEngineConfig> = {
     },
     verticals: ["web", "news"],
   },
-  buildRequest(input, config) {
+  buildRequest(input, config, warnings) {
     const mapped = {
       q: withDomainOperators(
         singleQuery(input.query),
@@ -59,7 +65,14 @@ export const serperAdapter: EngineAdapter<KeyedEngineConfig> = {
       method: "POST",
       url: config.baseUrl ?? endpoint,
       headers: { "X-API-KEY": config.apiKey },
-      body: mergeParams("serper", config, mapped, input.overrides),
+      body: mergeAdapterParams(
+        this,
+        config,
+        mapped,
+        input.overrides,
+        warnings,
+        countRule,
+      ),
     };
   },
   parseResponse(response, ctx) {

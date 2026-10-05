@@ -6,7 +6,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   singleQuery,
   truncateContent,
@@ -17,13 +16,20 @@ import type {
   ResultContent,
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
-import { withDomainOperators } from "./shared.js";
+import {
+  createParamsSchema,
+  mergeAdapterParams,
+  withDomainOperators,
+} from "./shared.js";
 
 const endpoint = "https://s.jina.ai/";
+
+const countRule = { param: "num" };
 
 export const jinaAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "jina",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({ count: countRule }),
   capabilities: {
     answer: false,
     content: true,
@@ -41,7 +47,7 @@ export const jinaAdapter: EngineAdapter<KeyedEngineConfig> = {
     },
     verticals: ["web"],
   },
-  buildRequest(input, config) {
+  buildRequest(input, config, warnings) {
     const options = contentOptions(input.includeContent);
     const mapped = {
       q: withDomainOperators(
@@ -62,7 +68,14 @@ export const jinaAdapter: EngineAdapter<KeyedEngineConfig> = {
         // Page content is expensive to produce; skip it unless asked for.
         ...(options ? {} : { "X-Respond-With": "no-content" }),
       },
-      body: mergeParams("jina", config, mapped, input.overrides),
+      body: mergeAdapterParams(
+        this,
+        config,
+        mapped,
+        input.overrides,
+        warnings,
+        countRule,
+      ),
     };
   },
   parseResponse(response, ctx) {

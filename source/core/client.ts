@@ -1,5 +1,5 @@
 import { builtInAdapters } from "../adapters/index.js";
-import { validateConfiguredDomains } from "../adapters/shared.js";
+import { validateNativeParams } from "../adapters/shared.js";
 import type {
   EngineAdapter,
   EngineConfig,
@@ -10,9 +10,11 @@ import type {
   QueryInput,
   SearchClient,
   SearchClientOptions,
+  SearchEngineError,
   SearchRequestOptions,
   SearchResponse,
   StrategyOptions,
+  TelemetryHooks,
   Warning,
 } from "../types/index.js";
 import {
@@ -20,19 +22,25 @@ import {
   EnginesConfigSchema,
   QueryInputSchema,
 } from "../types/index.js";
-import { DispatchGate } from "./gate.js";
+import { type AttemptLease, DispatchDenied, DispatchGate } from "./gate.js";
 import {
+  adapterError,
   executeWithRetries,
   networkError,
+  parseRateLimit,
+  redactHeaders,
   unsupportedFailure,
 } from "./http.js";
 import { AsyncQueue } from "./stream.js";
 import {
   addWarning,
+  deduplicateWarnings,
+  defaultTimeoutMs,
+  engineOverrides,
+  makeFailure,
   makeMetadata,
   mergeHooks,
   safeHook,
-  validateConfiguredCount,
 } from "./utils.js";
 
 const defaultHedgeDelayMs = 500;
@@ -75,8 +83,7 @@ export const createSearchClient = (
       const parsedConfig = adapter.configSchema.parse(
         EngineConfigSchema.parse(config),
       );
-      validateConfiguredCount(engine, parsedConfig.defaults, "defaults");
-      validateConfiguredDomains(engine, parsedConfig.defaults, "defaults");
+      validateNativeParams(adapter, parsedConfig.defaults, "defaults");
       return { adapter, config: parsedConfig };
     });
 
@@ -145,19 +152,18 @@ const validateRequestOverrides = (
   query: QueryInput,
 ): void => {
   for (const { adapter } of selected) {
-    const params = query.overrides?.[adapter.id];
-    validateConfiguredCount(adapter.id, params, `overrides.${adapter.id}`);
-    validateConfiguredDomains(adapter.id, params, `overrides.${adapter.id}`);
+    const params = engineOverrides(query.overrides, adapter.id);
+    validateNativeParams(adapter, params, `overrides.${adapter.id}`);
   }
 };
 
-export const search = (
+export const search = async (
   query: QueryInput,
   engines: EnginesConfig,
   options?: SearchClientOptions & SearchRequestOptions,
 ): Promise<SearchResponse> => {
   const { signal, hooks: requestHooks, ...clientOptions } = options ?? {};
-  return createSearchClient(engines, clientOptions).search(query, {
+  return await createSearchClient(engines, clientOptions).search(query, {
     signal,
     hooks: requestHooks,
   });
@@ -271,13 +277,15 @@ const searchRace = async (
   let won = false;
 
   const launch = (entry: SelectedEngine) =>
-    run(entry, combined).then((result) => {
-      results[entry.adapter.id] = result;
-      if (result.ok && !won) {
-        won = true;
-        controller.abort(new Error("Another engine already succeeded"));
-      }
-    });
+    run(entry, combined)
+      .catch((cause) => engineException(entry.adapter.id, "parse", cause))
+      .then((result) => {
+        results[entry.adapter.id] = result;
+        if (result.ok && !won) {
+          won = true;
+          controller.abort(new Error("Another engine already succeeded"));
+        }
+      });
 
   for (const [index, entry] of engines.entries()) {
     if (index > 0 && staggerMs > 0) {
@@ -320,89 +328,79 @@ const runEngine = async (input: {
   requestOptions?: SearchRequestOptions;
   gate?: DispatchGate;
 }): Promise<EngineResult> => {
-  const warnings = collectUnsupportedWarnings(
-    input.adapter,
-    input.query,
-    input.config,
-  );
   const hooks = mergedHooks(input);
-
-  if (warnings.length > 0 && input.config.onUnsupportedParam === "error") {
-    return settleFailure(unsupportedFailure(input.adapter.id, warnings), hooks);
-  }
-
-  const denial = input.gate?.denial(input.adapter.id);
-  if (denial && input.gate) {
-    return settleFailure(
-      input.gate.failure(input.adapter.id, denial, warnings),
-      hooks,
-    );
-  }
-
-  let release: (() => void) | undefined;
-  // Only await the gate when a throttle is configured: the extra microtask
-  // tick would otherwise delay request start past synchronous caller aborts.
-  if (input.gate && input.config.throttle) {
-    try {
-      release = await input.gate.acquire(
-        input.adapter.id,
-        input.config,
-        input.requestOptions?.signal,
-      );
-    } catch (cause) {
-      return settleFailure(
-        input.gate.failure(
-          input.adapter.id,
-          networkError("network", "Request aborted", cause, false),
-          warnings,
-        ),
-        hooks,
-      );
-    }
-  }
-
+  let warnings: Warning[] = [];
+  let phase: "bad_request" | "parse" = "bad_request";
+  let result: EngineResult;
   try {
-    const fetchImpl = resolveFetch(input.config, input.clientOptions.fetch);
-    const request = input.adapter.buildRequest(
+    warnings = collectUnsupportedWarnings(
+      input.adapter,
       input.query,
       input.config,
-      warnings,
     );
-
-    const result = await executeWithRetries({
-      engine: input.adapter.id,
-      request,
-      config: input.config,
-      fetch: fetchImpl,
-      hooks,
-      signal: input.requestOptions?.signal,
-      warnings,
-      parse: (response, latencyMs, rateLimit) =>
-        input.adapter.parseResponse(response, {
-          engine: input.adapter.id,
-          query: input.query,
-          config: input.config,
-          latencyMs,
-          httpStatus: response.status,
-          rateLimit,
-          warnings,
-          includeRaw: input.config.includeRaw ?? false,
-        }),
-    });
-
-    input.gate?.record(input.adapter.id, input.config, result);
-    if (!result.ok) {
-      safeHook(hooks, "onError", {
+    if (warnings.length > 0 && input.config.onUnsupportedParam === "error") {
+      result = unsupportedFailure(input.adapter.id, warnings);
+    } else {
+      const fetchImpl = resolveFetch(input.config, input.clientOptions.fetch);
+      const request = input.adapter.buildRequest(
+        input.query,
+        input.config,
+        warnings,
+      );
+      phase = "parse";
+      result = await executeWithRetries({
         engine: input.adapter.id,
-        error: result.error,
+        request,
+        config: input.config,
+        fetch: fetchImpl,
+        gate: input.gate,
+        retryParsedFailures: input.adapter.retryParsedFailures,
+        hooks,
+        signal: input.requestOptions?.signal,
+        warnings,
+        parse: (response, latencyMs, rateLimit) =>
+          input.adapter.parseResponse(response, {
+            engine: input.adapter.id,
+            query: input.query,
+            config: input.config,
+            latencyMs,
+            httpStatus: response.status,
+            rateLimit,
+            warnings,
+            includeRaw: input.config.includeRaw ?? false,
+          }),
       });
     }
-    safeHook(hooks, "onSettled", { engine: input.adapter.id, result });
-    return result;
-  } finally {
-    release?.();
+  } catch (cause) {
+    result = engineException(input.adapter.id, phase, cause, warnings);
   }
+  if (!result.ok) {
+    return settleFailure(result, hooks);
+  }
+  safeHook(hooks, "onSettled", { engine: input.adapter.id, result });
+  return result;
 };
+
+const engineException = (
+  engine: string,
+  kind: "bad_request" | "parse",
+  cause: unknown,
+  warnings: Warning[] = [],
+): EngineResult & { ok: false } =>
+  makeFailure({
+    engine,
+    error: adapterError(
+      kind,
+      kind === "bad_request" ? "Could not build request" : "Adapter failed",
+      cause,
+    ),
+    metadata: makeMetadata({
+      engine,
+      latencyMs: 0,
+      httpStatus: null,
+      warnings,
+    }),
+  }) as EngineResult & { ok: false };
 
 const settleFailure = (
   result: EngineResult & { ok: false },
@@ -446,38 +444,31 @@ const streamEngines = (input: {
 
   for (const { adapter, config } of input.selected) {
     void (async () => {
+      const hooks = mergeHooks(
+        input.clientOptions.hooks,
+        input.requestOptions?.hooks,
+        config.hooks,
+      );
+      let warnings: Warning[] = [];
       try {
-        const warnings = collectUnsupportedWarnings(
-          adapter,
-          input.query,
-          config,
-        );
-        const hooks = mergeHooks(
-          input.clientOptions.hooks,
-          input.requestOptions?.hooks,
-          config.hooks,
-        );
+        warnings = collectUnsupportedWarnings(adapter, input.query, config);
 
         if (warnings.length > 0 && config.onUnsupportedParam === "error") {
           const result = unsupportedFailure(adapter.id, warnings);
-          queue.push({
-            engine: adapter.id,
-            type: "error",
-            error: result.error,
-          });
-          queue.push({ engine: adapter.id, type: "done", result });
+          emitTerminalEvents(queue, adapter.id, settleFailure(result, hooks));
           return;
         }
 
         if (adapter.supportsStreaming && adapter.openStream) {
-          const fetchImpl = resolveFetch(config, input.clientOptions.fetch);
-          for await (const event of adapter.openStream(input.query, config, {
-            query: input.query,
+          for await (const event of runNativeStream({
+            adapter,
             config,
-            fetch: fetchImpl,
+            query: input.query,
+            fetch: resolveFetch(config, input.clientOptions.fetch),
             signal: controller.signal,
             hooks,
             warnings,
+            gate: input.gate,
           })) {
             queue.push(event);
           }
@@ -497,26 +488,13 @@ const streamEngines = (input: {
         });
         emitTerminalEvents(queue, adapter.id, result);
       } catch (cause) {
-        const error = {
-          kind: "parse" as const,
-          message: cause instanceof Error ? cause.message : "Stream failed",
-          status: null,
-          retryable: false,
+        const result = engineException(
+          adapter.id,
+          "bad_request",
           cause,
-        };
-        const result: EngineResult = {
-          ok: false,
-          engine: adapter.id,
-          error,
-          metadata: makeMetadata({
-            engine: adapter.id,
-            latencyMs: 0,
-            httpStatus: null,
-            warnings: [],
-          }),
-        };
-        queue.push({ engine: adapter.id, type: "error", error });
-        queue.push({ engine: adapter.id, type: "done", result });
+          warnings,
+        );
+        emitTerminalEvents(queue, adapter.id, settleFailure(result, hooks));
       } finally {
         pending -= 1;
         if (pending === 0) {
@@ -529,6 +507,293 @@ const streamEngines = (input: {
 
   return queue;
 };
+
+/** Native streams share attempt reservations and hold slots through body consumption. */
+async function* runNativeStream(input: {
+  adapter: EngineAdapter;
+  config: EngineConfig;
+  query: QueryInput;
+  fetch: FetchLike;
+  signal: AbortSignal;
+  hooks: ReturnType<typeof mergeHooks>;
+  warnings: Warning[];
+  gate?: DispatchGate;
+}): AsyncIterable<EngineStreamEvent> {
+  const { adapter, config, signal, hooks, warnings, gate } = input;
+  const leases: AttemptLease[] = [];
+  const readers = new Map<
+    ReadableStreamDefaultReader<Uint8Array>,
+    () => void
+  >();
+  const cleanups: (() => void)[] = [];
+  let result: EngineResult | undefined;
+  let requestError: SearchEngineError | undefined;
+  let lastResponse: Response | undefined;
+  const start = Date.now();
+  let nextRequest:
+    | Parameters<NonNullable<TelemetryHooks["onRequest"]>>[0]
+    | undefined;
+  let attempt = 0;
+  const streamHooks: TelemetryHooks = {
+    // The client owns terminal hooks; adapters report request/response progress.
+    ...(hooks?.onResponse ? { onResponse: hooks.onResponse } : {}),
+    ...(hooks?.onRetry ? { onRetry: hooks.onRetry } : {}),
+    onRequest: (event) => {
+      nextRequest = event;
+    },
+  };
+  let settled = false;
+  const settle = () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    for (const [reader, release] of readers) {
+      void reader.cancel(signal.reason).catch(() => undefined);
+      release();
+    }
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+    for (const [index, lease] of leases.entries()) {
+      lease.settle(index === leases.length - 1 ? result : undefined);
+      lease.release();
+    }
+    if (result) {
+      if (!result.ok) {
+        safeHook(hooks, "onError", { engine: adapter.id, error: result.error });
+      }
+      safeHook(hooks, "onSettled", { engine: adapter.id, result });
+    }
+  };
+  const guardedFetch: FetchLike = async (url, init) => {
+    let lease: AttemptLease | undefined;
+    let timedOut = false;
+    let cleanup: () => void = () => undefined;
+    try {
+      const caller = init?.signal
+        ? AbortSignal.any([signal, init.signal])
+        : signal;
+      const acquired = gate?.begin(adapter.id, config, caller);
+      lease = acquired instanceof Promise ? await acquired : acquired;
+      if (lease) {
+        leases.push(lease);
+      }
+      if (caller.aborted) {
+        throw caller.reason;
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort("timeout");
+      }, config.timeoutMs ?? defaultTimeoutMs);
+      const abort = () => controller.abort(caller.reason);
+      caller.addEventListener("abort", abort, { once: true });
+      cleanup = () => {
+        clearTimeout(timeout);
+        caller.removeEventListener("abort", abort);
+      };
+      cleanups.push(cleanup);
+      attempt += 1;
+      safeHook(
+        hooks,
+        "onRequest",
+        nextRequest
+          ? { ...nextRequest, engine: adapter.id, attempt }
+          : {
+              engine: adapter.id,
+              attempt,
+              url: String(url),
+              request: {
+                method: init?.method ?? "GET",
+                headers: redactHeaders(
+                  Object.fromEntries(new Headers(init?.headers).entries()),
+                ),
+                body: init?.body,
+              },
+            },
+      );
+      nextRequest = undefined;
+      if (caller.aborted) {
+        throw caller.reason;
+      }
+      lease?.dispatched();
+      const response = await input.fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+      lastResponse = response;
+      gate?.observe(adapter.id, parseRateLimit(response.headers));
+      if (!response.body) {
+        cleanup();
+        lease?.release();
+        return response;
+      }
+      const reader = response.body.getReader();
+      let bodyController: ReadableStreamDefaultController<Uint8Array>;
+      let finished = false;
+      const release = () => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        cleanup();
+        controller.signal.removeEventListener("abort", abortBody);
+        readers.delete(reader);
+        lease?.release();
+      };
+      const bodyError = (cause: unknown) => {
+        requestError = networkError(
+          signal.aborted || caller.aborted
+            ? "network"
+            : timedOut
+              ? "timeout"
+              : "network",
+          caller.aborted
+            ? "Request aborted"
+            : timedOut
+              ? "Request timed out"
+              : "Response body failed",
+          cause,
+          false,
+        );
+        return cause;
+      };
+      const abortBody = () => {
+        bodyController.error(bodyError(controller.signal.reason));
+        void reader.cancel(controller.signal.reason).catch(() => undefined);
+        release();
+      };
+      readers.set(reader, release);
+      const body = new ReadableStream<Uint8Array>({
+        start(out) {
+          bodyController = out;
+          controller.signal.addEventListener("abort", abortBody, {
+            once: true,
+          });
+          if (controller.signal.aborted) {
+            abortBody();
+          }
+        },
+        async pull(out) {
+          try {
+            const item = await reader.read();
+            if (finished) {
+              return;
+            }
+            if (item.done) {
+              out.close();
+              release();
+            } else {
+              out.enqueue(item.value);
+            }
+          } catch (cause) {
+            if (!finished) {
+              out.error(bodyError(cause));
+            }
+            release();
+          }
+        },
+        cancel(reason) {
+          release();
+          return reader.cancel(reason);
+        },
+      });
+      const wrapped = new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+      return new Proxy(wrapped, {
+        get(target, key) {
+          if (key === "url" || key === "redirected" || key === "type") {
+            return Reflect.get(response, key, response);
+          }
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    } catch (cause) {
+      cleanup();
+      lease?.release();
+      requestError =
+        cause instanceof DispatchDenied
+          ? cause.error
+          : networkError(
+              timedOut ? "timeout" : "network",
+              signal.aborted
+                ? "Request aborted"
+                : timedOut
+                  ? "Request timed out"
+                  : "Request failed",
+              cause,
+              false,
+            );
+      throw cause;
+    }
+  };
+  try {
+    if (!adapter.openStream) {
+      throw new Error("Adapter has no stream implementation");
+    }
+    for await (const event of adapter.openStream(input.query, config, {
+      query: input.query,
+      config,
+      fetch: guardedFetch,
+      signal,
+      hooks: streamHooks,
+      warnings,
+    })) {
+      if (signal.aborted) {
+        throw signal.reason;
+      }
+      if (event.type === "done") {
+        const unique = deduplicateWarnings([
+          ...warnings,
+          ...event.result.metadata.warnings,
+        ]);
+        result = {
+          ...event.result,
+          metadata: { ...event.result.metadata, warnings: unique },
+        };
+        settle();
+        yield { ...event, result };
+        return;
+      }
+      yield event;
+    }
+    if (!result) {
+      throw new Error("Stream ended without a terminal result");
+    }
+  } catch (cause) {
+    const error =
+      requestError ??
+      (signal.aborted
+        ? networkError("network", "Request aborted", cause, false)
+        : adapterError(
+            leases.length > 0 ? "parse" : "bad_request",
+            "Stream failed",
+            cause,
+            lastResponse?.status ?? null,
+          ));
+    result = makeFailure({
+      engine: adapter.id,
+      error,
+      metadata: makeMetadata({
+        engine: adapter.id,
+        latencyMs: Date.now() - start,
+        httpStatus: lastResponse?.status ?? null,
+        rateLimit: lastResponse ? parseRateLimit(lastResponse.headers) : null,
+        warnings,
+      }),
+    });
+    settle();
+    yield { engine: adapter.id, type: "error", error };
+    yield { engine: adapter.id, type: "done", result };
+  } finally {
+    settle();
+  }
+}
 
 const emitTerminalEvents = (
   queue: AsyncQueue<EngineStreamEvent>,

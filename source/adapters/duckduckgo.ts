@@ -5,12 +5,13 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   queryParams,
   singleQuery,
 } from "../core/utils.js";
 import type { Answer, EngineAdapter } from "../types/index.js";
 import { EngineConfigSchema } from "../types/index.js";
+
+import { mergeAdapterParams } from "./shared.js";
 
 const endpoint = "https://api.duckduckgo.com/";
 
@@ -51,8 +52,8 @@ export const duckduckgoAdapter: EngineAdapter = {
       method: "GET",
       url: config.baseUrl ?? endpoint,
       query: queryParams(
-        "duckduckgo",
-        mergeParams("duckduckgo", config, mapped, input.overrides),
+        this.id,
+        mergeAdapterParams(this, config, mapped, input.overrides, warnings),
         warnings,
       ),
     };
