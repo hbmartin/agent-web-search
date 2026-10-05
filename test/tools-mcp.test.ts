@@ -80,7 +80,11 @@ describe("web search tools", () => {
     };
 
     expect(schema.type).toBe("object");
-    expect(Object.keys(schema.properties).sort()).toEqual([
+    expect(
+      Object.keys(schema.properties).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    ).toEqual([
       "count",
       "excludeDomains",
       "freshness",

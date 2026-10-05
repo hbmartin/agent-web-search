@@ -59,10 +59,51 @@ Node builtins. CI enforces this with `pnpm check:browser`.
 
 ## Releases
 
-Releases are automated with [changesets](https://github.com/changesets/changesets).
+Follow the [release checklist](./RELEASE.md) for setup, publishing, and verification.
+
+Versions and changelogs are prepared with [Changesets](https://github.com/changesets/changesets).
 Every user-facing change should include a changeset (`pnpm changeset`).
-Merging to `main` opens/updates a release PR; merging that PR publishes to
-npm with provenance.
+
+Prepare each release manually:
+
+1. Run `pnpm changeset version` to apply pending changesets and update the
+   package version and changelog.
+2. Commit the version and changelog changes and merge them to `main`.
+3. Create a GitHub Release for that merged commit with a tag of
+   `v<package.json version>` (for example, `v0.2.0`), then publish the release.
+
+The release workflow checks out the tagged commit, verifies the tag matches
+the package version, and runs tests, type checking, the build, package-export
+checks, and browser checks before publishing. Stable releases use the npm
+`latest` tag; GitHub prereleases use `next`. Prepare a prerelease package
+version with Changesets before publishing a GitHub prerelease.
+
+Publishing authenticates exclusively through
+[npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) using
+GitHub OIDC. The workflow publishes with provenance and uses the existing
+GitHub environment named `npm`.
+
+Before publishing the first release, configure a GitHub Actions trusted
+publisher in the npm settings for `agent-web-search`:
+
+| Field | Value |
+| --- | --- |
+| Organization or user | `hbmartin` |
+| Repository | `agent-web-search` |
+| Workflow filename | `release.yml` |
+| Environment name | `npm` |
+| Allowed action | Direct publishing with `npm publish` |
+
+Use only the workflow filename, including the extension. The repository,
+workflow, and environment values must match exactly. Trusted publishing
+automatically generates provenance for this public repository and package.
+
+After the first intended release confirms OIDC authentication and provenance,
+select **Require two-factor authentication and disallow tokens** in the npm
+package's **Publishing access** settings. Revoke obsolete npm publishing
+tokens and remove the unused `NPM_TOKEN` secret from GitHub, including the
+`npm` environment if it was stored there. Local package dry runs verify
+contents; verifying registry trust requires an intended release.
 
 ## Code style
 

@@ -420,7 +420,9 @@ pnpm check:browser  # browser-platform bundle smoke test
 pnpm docs           # generate TypeDoc API docs
 ```
 
-Requires Node.js >= 22. This repo uses [pnpm](https://pnpm.io) (pinned via `packageManager`), [Vitest](https://vitest.dev) for tests (including per-adapter contract fixtures in `test/fixtures/`, property-based tests with fast-check, and an env-gated live suite), and [Biome](https://biomejs.dev) for linting and formatting. Releases are automated with [changesets](https://github.com/changesets/changesets) and published to npm with provenance. A scheduled `live` workflow runs the real-API integration tests weekly to catch provider drift.
+Requires Node.js >= 22. This repo uses [pnpm](https://pnpm.io) (pinned via `packageManager`), [Vitest](https://vitest.dev) for tests (including per-adapter contract fixtures in `test/fixtures/`, property-based tests with fast-check, and an env-gated live suite), and [Biome](https://biomejs.dev) for linting and formatting. Versions and changelogs are prepared manually with [Changesets](https://github.com/changesets/changesets). A scheduled `live` workflow runs the real-API integration tests weekly to catch provider drift.
+
+To release, run `pnpm changeset version`, commit and merge the version and changelog changes to `main`, then publish a GitHub Release tagged `v<package.json version>`. The release workflow publishes the tagged commit to npm exclusively through trusted publishing (GitHub OIDC), with provenance. Stable releases use `latest`; prereleases use `next`. See the [release checklist](./RELEASE.md) for npm setup and the full release process.
 
 ## License
 
