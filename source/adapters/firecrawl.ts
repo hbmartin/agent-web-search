@@ -19,6 +19,7 @@ import type {
   ResultContent,
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
+import { resolveDomainFilters } from "./shared.js";
 
 const endpoint = "https://api.firecrawl.dev/v2/search";
 
@@ -55,22 +56,22 @@ export const firecrawlAdapter: EngineAdapter<KeyedEngineConfig> = {
       excludeDomains: input.excludeDomains,
       scrapeOptions: options ? scrapeOptions(options, warnings) : undefined,
     };
-    const merged = mergeParams("firecrawl", config, mapped, input.overrides);
-
-    if (
-      Array.isArray(merged.includeDomains) &&
-      merged.includeDomains.length > 0 &&
-      Array.isArray(merged.excludeDomains) &&
-      merged.excludeDomains.length > 0
-    ) {
-      merged.excludeDomains = undefined;
-      addWarning(
-        warnings,
-        "provider_param_conflict",
-        "firecrawl cannot combine includeDomains and excludeDomains; includeDomains wins",
-        "excludeDomains",
-      );
-    }
+    const merged = mergeParams(
+      "firecrawl",
+      config,
+      mapped,
+      input.overrides,
+      warnings,
+    );
+    resolveDomainFilters({
+      engine: "firecrawl",
+      params: merged,
+      query: input,
+      config,
+      includeKey: "includeDomains",
+      excludeKey: "excludeDomains",
+      warnings,
+    });
 
     return {
       method: "POST",

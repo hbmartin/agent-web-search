@@ -1,6 +1,5 @@
 import {
   asArray,
-  clampWithWarning,
   firstString,
   freshnessStartDate,
   isObject,
@@ -26,8 +25,35 @@ const namedEntities: Readonly<Record<string, string>> = {
   gt: ">",
 };
 
-// Algolia caps this index at 1000 hits per page.
-const maxHitsPerPage = 1000;
+const c1Entities: Readonly<Record<number, string>> = {
+  128: "€",
+  130: "‚",
+  131: "ƒ",
+  132: "„",
+  133: "…",
+  134: "†",
+  135: "‡",
+  136: "ˆ",
+  137: "‰",
+  138: "Š",
+  139: "‹",
+  140: "Œ",
+  142: "Ž",
+  145: "‘",
+  146: "’",
+  147: "“",
+  148: "”",
+  149: "•",
+  150: "–",
+  151: "—",
+  152: "˜",
+  153: "™",
+  154: "š",
+  155: "›",
+  156: "œ",
+  158: "ž",
+  159: "Ÿ",
+};
 
 const engineDefaults = { tags: "story" };
 
@@ -75,15 +101,8 @@ export const hackernewsAdapter: EngineAdapter = {
     };
     const merged: Record<string, unknown> = {
       ...engineDefaults,
-      ...mergeParams("hackernews", config, mapped, input.overrides),
+      ...mergeParams("hackernews", config, mapped, input.overrides, warnings),
     };
-    merged.hitsPerPage = clampWithWarning(
-      "hackernews",
-      "count",
-      merged.hitsPerPage,
-      maxHitsPerPage,
-      warnings,
-    );
 
     return {
       method: "GET",
@@ -177,9 +196,18 @@ const decodeHtmlEntity = (entity: string, encoded: string): string => {
     encoded.slice(hexadecimal ? 2 : 1),
     hexadecimal ? 16 : 10,
   );
+  if (codePoint === 0) {
+    return "\uFFFD";
+  }
+  if (codePoint >= 0x7f && codePoint <= 0x9f) {
+    return c1Entities[codePoint] ?? entity;
+  }
   if (
-    (codePoint >= 0x00 && codePoint <= 0x1f) ||
-    (codePoint >= 0x7f && codePoint <= 0x9f) ||
+    (codePoint <= 0x1f &&
+      codePoint !== 0x09 &&
+      codePoint !== 0x0a &&
+      codePoint !== 0x0c &&
+      codePoint !== 0x0d) ||
     codePoint > 0x10_ff_ff ||
     (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff)
   ) {

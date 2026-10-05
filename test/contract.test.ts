@@ -331,7 +331,7 @@ describe("adapter contract fixtures", () => {
           objectID: "numeric-entities",
           title: "Entity handling",
           story_text:
-            "<p>slashes: &#47; &#x2F; &#X2f;; named: &amp;; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &#38;lt; &amp;#x2F;</p>",
+            "<p>slashes: &#47; &#x2F; &#X2f;; named: &amp;; whitespace: a&#9;b&#10;c&#xC;d&#13;e; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; apostrophe: it&#x92;s; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &#38;lt; &amp;#x2F;</p>",
         },
       ],
       nbHits: 1,
@@ -346,7 +346,7 @@ describe("adapter contract fixtures", () => {
     }
     const snippet = parsed.results[0]?.snippet;
     expect(snippet).toBe(
-      "slashes: / / /; named: &; controls: &#0; &#1; &#x1F; &#127; &#128; &#x9F;; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &lt; &#x2F;",
+      "slashes: / / /; named: &; whitespace: a b c d e; controls: � &#1; &#x1F; &#127; € Ÿ; apostrophe: it’s; invalid: &#xD800; &#55296; &#x110000; &#1114112; &#xZZ;; once: &lt; &#x2F;",
     );
     expect(
       [...(snippet ?? "")].some((character) => {
@@ -371,6 +371,70 @@ describe("adapter contract fixtures", () => {
     expect(parsed.results[0]?.image).toBe("https://example.com/espresso.jpg");
     // An empty socialimage must not become an empty-string image.
     expect(parsed.results[1]?.image).toBeNull();
+  });
+
+  it("classifies GDELT plain-text notices and preserves raw only on request", () => {
+    const adapter = adapterFor("gdelt");
+    const response = {
+      ...responseFor("rate limit exceeded"),
+      text: "rate limit exceeded",
+    };
+    const context = contextFor(adapter, query);
+    const failed = EngineResultSchema.parse(
+      adapter.parseResponse(response, context),
+    );
+
+    expect(failed.ok).toBe(false);
+    if (failed.ok) {
+      return;
+    }
+    expect(failed.error).toMatchObject({
+      kind: "rate_limit",
+      status: 200,
+      retryable: true,
+    });
+    expect(failed.error.message).toContain("rate limit exceeded");
+    expect(failed.error).not.toHaveProperty("raw");
+    expect(failed.metadata).toMatchObject({ httpStatus: 200, rateLimit: null });
+    expect(failed.metadata).not.toHaveProperty("raw");
+
+    const withRaw = EngineResultSchema.parse(
+      adapter.parseResponse(response, { ...context, includeRaw: true }),
+    );
+    expect(withRaw.ok).toBe(false);
+    if (!withRaw.ok) {
+      expect(withRaw.error.raw).toBe("rate limit exceeded");
+      expect(withRaw.metadata.raw).toBe("rate limit exceeded");
+    }
+
+    const syntax = adapter.parseResponse(
+      responseFor("Invalid query syntax near OR"),
+      context,
+    );
+    expect(syntax.ok).toBe(false);
+    if (!syntax.ok) {
+      expect(syntax.error).toMatchObject({
+        kind: "bad_request",
+        retryable: false,
+      });
+      expect(syntax.error.message).toContain("Invalid query syntax");
+    }
+
+    for (const raw of [null, '{"articles": [']) {
+      const malformed = adapter.parseResponse(responseFor(raw), context);
+      expect(malformed.ok).toBe(false);
+      if (!malformed.ok) {
+        expect(malformed.error.kind).toBe("parse");
+      }
+    }
+
+    const empty = EngineResultSchema.parse(
+      adapter.parseResponse(responseFor({ articles: [] }), context),
+    );
+    expect(empty.ok).toBe(true);
+    if (empty.ok) {
+      expect(empty.results).toEqual([]);
+    }
   });
 
   it("lets config.defaults override adapter request defaults", () => {
@@ -486,11 +550,6 @@ describe("adapter contract fixtures", () => {
 
     for (const { id, includeKey, excludeKey } of cases) {
       const adapter = adapterFor(id);
-      const expectedWarning = {
-        code: "provider_param_conflict",
-        message: expect.stringContaining("include"),
-        param: "excludeDomains",
-      };
       const scenarios = [
         {
           input: { ...query, includeDomains: ["query.example"] },
@@ -499,6 +558,8 @@ describe("adapter contract fixtures", () => {
             defaults: { [excludeKey]: ["default-blocked.example"] },
           }),
           expectedInclude: ["query.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
         },
         {
           input: {
@@ -508,6 +569,9 @@ describe("adapter contract fixtures", () => {
           },
           config: configFor(adapter),
           expectedInclude: ["query.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
+          warningParam: id === "you" ? "excludeDomains" : excludeKey,
         },
         {
           input: {
@@ -520,7 +584,49 @@ describe("adapter contract fixtures", () => {
             apiKey: "test-key",
             defaults: { [includeKey]: ["default.example"] },
           }),
-          expectedInclude: ["default.example"],
+          expectedInclude: undefined,
+          expectedExclude: ["override-blocked.example"],
+          dropped: includeKey,
+        },
+        {
+          input: {
+            ...query,
+            excludeDomains: ["query-blocked.example"],
+          },
+          config: adapter.configSchema.parse({
+            apiKey: "test-key",
+            defaults: { [includeKey]: ["default.example"] },
+          }),
+          expectedInclude: undefined,
+          expectedExclude: ["query-blocked.example"],
+          dropped: includeKey,
+        },
+        {
+          input: {
+            ...query,
+            excludeDomains: ["query-blocked.example"],
+            overrides: { [id]: { [includeKey]: ["override.example"] } },
+          },
+          config: configFor(adapter),
+          expectedInclude: ["override.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
+          warningParam: id === "you" ? "excludeDomains" : excludeKey,
+        },
+        {
+          input: {
+            ...query,
+            overrides: {
+              [id]: {
+                [includeKey]: ["override.example"],
+                [excludeKey]: ["override-blocked.example"],
+              },
+            },
+          },
+          config: configFor(adapter),
+          expectedInclude: ["override.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
         },
       ];
 
@@ -531,13 +637,156 @@ describe("adapter contract fixtures", () => {
           scenario.config,
           warnings,
         );
+        expect(request.method).toBe("POST");
+        expect(request.body).toBeDefined();
         const params = request.body as Record<string, unknown>;
 
         expect(params[includeKey]).toEqual(scenario.expectedInclude);
-        expect(params[excludeKey]).toBeUndefined();
-        expect(warnings).toEqual([expectedWarning]);
+        expect(params[excludeKey]).toEqual(scenario.expectedExclude);
+        expect(warnings).toEqual([
+          {
+            code: "provider_param_conflict",
+            message: expect.stringContaining("cannot combine"),
+            param: scenario.warningParam ?? scenario.dropped,
+          },
+        ]);
       }
     }
+  });
+
+  it("preserves explicit domain unsets and rejects invalid provider filters", () => {
+    for (const [id, includeKey, excludeKey] of [
+      ["firecrawl", "includeDomains", "excludeDomains"],
+      ["you", "include_domains", "exclude_domains"],
+    ] as const) {
+      const adapter = adapterFor(id);
+      const warnings: Warning[] = [];
+      const request = adapter.buildRequest(
+        {
+          query: "espresso",
+          excludeDomains: ["blocked.example"],
+          overrides: { [id]: { [includeKey]: undefined } },
+        },
+        adapter.configSchema.parse({
+          apiKey: "test-key",
+          defaults: { [includeKey]: ["default.example"] },
+        }),
+        warnings,
+      );
+      expect(request.method).toBe("POST");
+      expect(request.body).toBeDefined();
+      const params = request.body as Record<string, unknown>;
+      expect(params[includeKey]).toBeUndefined();
+      expect(params[excludeKey]).toEqual(["blocked.example"]);
+      expect(warnings).toEqual([]);
+
+      expect(() =>
+        adapter.buildRequest(
+          { query: "espresso", excludeDomains: ["blocked.example"] },
+          adapter.configSchema.parse({
+            apiKey: "test-key",
+            defaults: { [includeKey]: 42 },
+          }),
+          [],
+        ),
+      ).toThrow(`${id} ${includeKey}`);
+    }
+  });
+
+  it("uses You GET strings and converts them to arrays when POST is required", () => {
+    const adapter = adapterFor("you");
+    const config = adapter.configSchema.parse({
+      apiKey: "test-key",
+      defaults: { include_domains: "a.example, b.example" },
+    });
+    const getWarnings: Warning[] = [];
+    const getRequest = adapter.buildRequest(
+      { query: "espresso" },
+      config,
+      getWarnings,
+    );
+    expect(getRequest.method).toBe("GET");
+    expect(getRequest.query?.include_domains).toBe("a.example,b.example");
+    expect(getWarnings).toEqual([]);
+
+    const postWarnings: Warning[] = [];
+    const postRequest = adapter.buildRequest(
+      { query: "espresso", excludeDomains: [], includeContent: true },
+      config,
+      postWarnings,
+    );
+    expect(postRequest.method).toBe("POST");
+    expect(postRequest.body).toBeDefined();
+    expect(postRequest.body).toMatchObject({
+      include_domains: ["a.example", "b.example"],
+    });
+    expect(postWarnings).toEqual([]);
+
+    const conflictWarnings: Warning[] = [];
+    const conflict = adapter.buildRequest(
+      { query: "espresso" },
+      adapter.configSchema.parse({
+        apiKey: "test-key",
+        defaults: {
+          include_domains: "a.example",
+          exclude_domains: "b.example",
+        },
+      }),
+      conflictWarnings,
+    );
+    expect(conflict.method).toBe("GET");
+    expect(conflict.query?.include_domains).toBe("a.example");
+    expect(conflict.query?.exclude_domains).toBeUndefined();
+    expect(conflictWarnings).toEqual([
+      {
+        code: "provider_param_conflict",
+        message: expect.stringContaining("include_domains wins"),
+        param: "exclude_domains",
+      },
+    ]);
+  });
+
+  it("treats null and empty domain filters as absent and rejects malformed filters", () => {
+    const firecrawl = adapterFor("firecrawl");
+    const emptyWarnings: Warning[] = [];
+    const empty = firecrawl.buildRequest(
+      { query: "espresso", includeDomains: [] },
+      firecrawl.configSchema.parse({
+        apiKey: "test-key",
+        defaults: { includeDomains: null, excludeDomains: [] },
+      }),
+      emptyWarnings,
+    );
+    expect(empty.body).toMatchObject({
+      includeDomains: undefined,
+      excludeDomains: undefined,
+    });
+    expect(emptyWarnings).toEqual([]);
+
+    for (const invalidValue of ["a.example", "   ", ["a.example", " "]]) {
+      expect(() =>
+        firecrawl.buildRequest(
+          { query: "espresso" },
+          firecrawl.configSchema.parse({
+            apiKey: "test-key",
+            defaults: { includeDomains: invalidValue },
+          }),
+          [],
+        ),
+      ).toThrow("firecrawl includeDomains");
+    }
+
+    const you = adapterFor("you");
+    expect(() =>
+      you.buildRequest(
+        { query: "espresso" },
+        you.configSchema.parse({
+          apiKey: "test-key",
+          defaults: { include_domains: "a.example,,b.example" },
+        }),
+        [],
+      ),
+    ).toThrow("you include_domains");
   });
 
   it("applies adapter request defaults when config.defaults is absent", () => {
@@ -641,8 +890,8 @@ describe("adapter contract fixtures", () => {
       expect(defaultWarnings).toEqual([
         {
           code: "clamped_param",
-          message: `${id} count was clamped to ${limit}`,
-          param: "count",
+          message: `${id} ${parameter} was clamped to ${limit}`,
+          param: parameter,
         },
       ]);
 
@@ -659,8 +908,8 @@ describe("adapter contract fixtures", () => {
       expect(overrideWarnings).toEqual([
         {
           code: "clamped_param",
-          message: `${id} count was clamped to ${limit}`,
-          param: "count",
+          message: `${id} ${parameter} was clamped to ${limit}`,
+          param: parameter,
         },
       ]);
 
@@ -676,7 +925,88 @@ describe("adapter contract fixtures", () => {
       );
       expect(overriddenLow.query?.[parameter]).toBe(limit - 1);
       expect(effectiveWarnings).toEqual([]);
+
+      for (const invalidValue of [String(limit + 1), 0, -3, 2.5]) {
+        for (const source of ["default", "override"] as const) {
+          const invalidInput =
+            source === "override"
+              ? {
+                  ...query,
+                  overrides: { [id]: { [parameter]: invalidValue } },
+                }
+              : query;
+          const invalidConfig =
+            source === "default"
+              ? adapter.configSchema.parse({
+                  apiKey: "test-key",
+                  defaults: { [parameter]: invalidValue },
+                })
+              : configFor(adapter);
+          expect(() =>
+            adapter.buildRequest(invalidInput, invalidConfig, []),
+          ).toThrow(
+            `${id} ${source === "default" ? "defaults" : `overrides.${id}`}.${parameter}`,
+          );
+        }
+      }
     }
+  });
+
+  it("caps documented POST provider counts after overrides", () => {
+    for (const { id, parameter, limit } of [
+      { id: "tavily", parameter: "max_results", limit: 20 },
+      { id: "firecrawl", parameter: "limit", limit: 100 },
+      { id: "exa", parameter: "numResults", limit: 100 },
+    ]) {
+      const adapter = adapterFor(id);
+      for (const [input, config, expectedParam] of [
+        [{ ...query, count: limit + 1 }, configFor(adapter), "count"],
+        [
+          query,
+          adapter.configSchema.parse({
+            apiKey: "test-key",
+            defaults: { [parameter]: limit + 1 },
+          }),
+          parameter,
+        ],
+        [
+          { ...query, overrides: { [id]: { [parameter]: limit + 1 } } },
+          configFor(adapter),
+          parameter,
+        ],
+      ] as const) {
+        const warnings: Warning[] = [];
+        const request = adapter.buildRequest(input, config, warnings);
+        expect(request.body?.[parameter]).toBe(limit);
+        expect(warnings).toEqual([
+          {
+            code: "clamped_param",
+            message: `${id} ${expectedParam} was clamped to ${limit}`,
+            param: expectedParam,
+          },
+        ]);
+      }
+    }
+  });
+
+  it("validates Kagi native counts without an arbitrary maximum", () => {
+    const adapter = adapterFor("kagi");
+    const allowed = adapter.buildRequest(
+      { ...query, count: 500 },
+      configFor(adapter),
+      [],
+    );
+    expect(allowed.query?.limit).toBe(500);
+    expect(() =>
+      adapter.buildRequest(
+        query,
+        adapter.configSchema.parse({
+          apiKey: "test-key",
+          defaults: { limit: -1 },
+        }),
+        [],
+      ),
+    ).toThrow("kagi defaults.limit");
   });
 
   it("keeps GDELT domain filters on its fuzzy suffix operators", () => {

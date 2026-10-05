@@ -42,7 +42,7 @@ export const tavilyAdapter: EngineAdapter<KeyedEngineConfig> = {
     },
     verticals: ["web", "news"],
   },
-  buildRequest(input, config) {
+  buildRequest(input, config, warnings) {
     const options = contentOptions(input.includeContent);
     const mapped = {
       query: singleQuery(input.query),
@@ -64,7 +64,7 @@ export const tavilyAdapter: EngineAdapter<KeyedEngineConfig> = {
       method: "POST",
       url: config.baseUrl ?? endpoint,
       headers: { Authorization: `Bearer ${config.apiKey}` },
-      body: mergeParams("tavily", config, mapped, input.overrides),
+      body: mergeParams("tavily", config, mapped, input.overrides, warnings),
     };
   },
   parseResponse(response, ctx) {

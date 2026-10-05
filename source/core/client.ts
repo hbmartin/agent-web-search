@@ -1,4 +1,5 @@
 import { builtInAdapters } from "../adapters/index.js";
+import { validateConfiguredDomains } from "../adapters/shared.js";
 import type {
   EngineAdapter,
   EngineConfig,
@@ -26,7 +27,13 @@ import {
   unsupportedFailure,
 } from "./http.js";
 import { AsyncQueue } from "./stream.js";
-import { addWarning, makeMetadata, mergeHooks, safeHook } from "./utils.js";
+import {
+  addWarning,
+  makeMetadata,
+  mergeHooks,
+  safeHook,
+  validateConfiguredCount,
+} from "./utils.js";
 
 const defaultHedgeDelayMs = 500;
 
@@ -68,6 +75,8 @@ export const createSearchClient = (
       const parsedConfig = adapter.configSchema.parse(
         EngineConfigSchema.parse(config),
       );
+      validateConfiguredCount(engine, parsedConfig.defaults, "defaults");
+      validateConfiguredDomains(engine, parsedConfig.defaults, "defaults");
       return { adapter, config: parsedConfig };
     });
 
@@ -81,6 +90,7 @@ export const createSearchClient = (
   return {
     search: async (query, requestOptions) => {
       const parsedQuery = QueryInputSchema.parse(query);
+      validateRequestOverrides(selected, parsedQuery);
       const strategy = resolveStrategy(options, requestOptions);
       const signal = withDeadline(requestOptions?.signal, strategy.deadlineMs);
       const ordered = orderSelected(selected, strategy.order);
@@ -114,6 +124,7 @@ export const createSearchClient = (
     },
     searchStream: (query, requestOptions) => {
       const parsedQuery = QueryInputSchema.parse(query);
+      validateRequestOverrides(selected, parsedQuery);
       const strategy = resolveStrategy(options, requestOptions);
       return streamEngines({
         selected: orderSelected(selected, strategy.order),
@@ -127,6 +138,17 @@ export const createSearchClient = (
       });
     },
   };
+};
+
+const validateRequestOverrides = (
+  selected: SelectedEngine[],
+  query: QueryInput,
+): void => {
+  for (const { adapter } of selected) {
+    const params = query.overrides?.[adapter.id];
+    validateConfiguredCount(adapter.id, params, `overrides.${adapter.id}`);
+    validateConfiguredDomains(adapter.id, params, `overrides.${adapter.id}`);
+  }
 };
 
 export const search = (

@@ -95,8 +95,8 @@ export const QueryInputSchema = z
       .strict()
       .optional(),
     freshness: z.enum(["day", "week", "month", "year"]).optional(),
-    includeDomains: z.array(z.string().min(1)).optional(),
-    excludeDomains: z.array(z.string().min(1)).optional(),
+    includeDomains: z.array(z.string().trim().min(1)).optional(),
+    excludeDomains: z.array(z.string().trim().min(1)).optional(),
     country: z.string().min(2).optional(),
     language: z.string().min(2).optional(),
     safeSearch: z.enum(["off", "moderate", "strict"]).optional(),
