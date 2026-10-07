@@ -163,7 +163,7 @@ const block = formatForLLM(response, {
 });
 ```
 
-Markdown output includes answers, engine errors, provider warnings, and a numbered search result list with title, date, URL, snippet, and source engines. Empty answer, error, and warning sections are omitted. XML emits fully escaped `<answer>`, `<engine_error>`, `<engine_warning>`, and `<result>` elements within `<search_results>`. Warnings are deduplicated per engine and preserved by `aggregate()` in its optional `warnings` field. Set `includeWarnings: false` for the previous warning-free formatting.
+Markdown output includes answers, engine errors, provider warnings, and a numbered search result list with title, date, URL, snippet, and source engines. Empty answer, error, and warning sections are omitted. XML emits fully escaped `<answer>`, `<engine_error>`, `<engine_warning>`, and `<result>` elements within `<search_results>`. Warnings are deduplicated per engine and preserved by `aggregate()` in its optional `warnings` field. Unsupported-parameter warnings already represented by an engine's `unsupported` error are omitted from formatted warnings; their metadata is preserved. Set `includeWarnings: false` for the previous warning-free formatting.
 
 ### Agent tool definitions
 
@@ -254,19 +254,26 @@ const client = createSearchClient(
 - `throttle.maxConcurrent` caps in-flight requests through response-body consumption; `minIntervalMs` spaces **every attempt**, including retries and native streaming fetches. Concurrency slots are released during retry backoff.
 - With `respectRateLimits: true`, an engine whose last response reported an exhausted rate limit fails fast with a `rate_limit` error until the provider-reported reset time, instead of burning a request.
 - Before each attempt, the client atomically reserves `costPerRequestUsd` and rejects requests whose estimate would exceed the remaining budget with a `quota` error. Reservations include concurrent requests and retries, and reconcile to provider-reported costs (`usage.costUsd`, e.g. Exa) afterward. Failed or cancelled dispatched requests retain their estimate; cancellation before dispatch costs nothing.
+- Known budget and rate-limit denials are checked before concurrency and pacing waits, then rechecked before admission. Denied attempts do not advance the pacing schedule; cost is reserved only after waiting finishes.
 - Engines without an estimate reserve zero and use reported costs afterward. This is best-effort accounting: unestimated requests and actual charges above estimates can exceed the configured ceiling. Provide estimates, including `0` for free engines, when you need predictable admission. For example, a $1 budget with a $0.60 estimate now permits one request, rather than two.
 
 ### Retries and adapter failures
 
 HTTP 429 and retryable upstream errors use `maxRetries` (default 2) and exponential backoff. `retry.retryStatuses` filters non-2xx HTTP retries; it does not filter network failures or opted-in parsed failures. `maxRetries: 0` disables retries.
 
-A custom adapter's retryable failure returned from a 2xx response is retried only when the adapter sets `retryParsedFailures: true`; the default is false. GDELT opts in for recognized plain-text rate-limit notices, including “Please limit requests to one every 5 seconds.” Query errors are non-retryable `bad_request` failures, and unknown non-object bodies are `parse` failures. Setting `retryStatuses: [429]` no longer suppresses GDELT's opted-in 2xx retries.
+A custom adapter's retryable failure returned from a 2xx response is retried only when the adapter sets `retryParsedFailures: true`; the default is false. GDELT opts in for recognized plain-text rate-limit notices, including “Please limit requests to one every 5 seconds,” and sets `error.retryAfterMs: 5000` to enforce a five-second minimum retry delay even with jitter or a zero initial backoff. Query errors are non-retryable `bad_request` failures, and unknown non-object bodies are `parse` failures. Setting `retryStatuses: [429]` no longer suppresses GDELT's opted-in 2xx retries.
+
+Adapters can set optional `SearchEngineError.retryAfterMs` to a nonnegative safe integer specifying the minimum retry delay in milliseconds. The minimum applies after backoff, jitter, and existing `Retry-After` header handling. If it exceeds `retry.maxDelayMs` (default 5000), the retry is suppressed rather than exceeding the caller's maximum delay.
+
+When budget or rate-limit admission blocks a retry, the result retains the last upstream error and its HTTP metadata, including raw data when enabled, and adds a `retry_suppressed` metadata warning explaining why retrying stopped. A minimum delay above `maxDelayMs` uses the same warning. Denial before the first attempt still returns the gate's `quota` or `rate_limit` error. `onRetry` reports a scheduled retry; a subsequent gate change or cancellation may prevent its dispatch. Already known denials emit no `onRetry`, and suppressed attempts emit no `onRequest` and incur no cost.
 
 Thrown request builders or serialization errors become per-engine, non-retryable `bad_request` failures. Thrown parsers become non-retryable `parse` failures with their original cause and HTTP metadata. These failures are isolated under every strategy, so another engine's result can still succeed.
 
 ### Streaming
 
-`searchStream` yields events as each engine produces them. Native streams use the same cost reservations, pacing, concurrency, and network timeout as ordinary fetches; emitted streams are never automatically replayed. Engines that support native streaming (e.g. Sonar) emit `answer_delta` events; non-streaming engines emit their terminal events when they complete.
+`searchStream` yields events as each engine produces them. Native streams use the same cost reservations, pacing, and concurrency as ordinary fetches; emitted streams are never automatically replayed. Engines that support native streaming (e.g. Sonar) emit `answer_delta` events; non-streaming engines emit their terminal events when they complete.
+
+For native streams, `timeoutMs` (default 30000) bounds the connection through response headers, then bounds inactivity during pending body reads. Nonempty chunks reset the idle timeout, and consumer backpressure suspends it, so a progressing stream can run longer than 30 seconds. Set `deadlineMs` for an overall search deadline. Ordinary requests retain a total network timeout covering connection, headers, and body consumption.
 
 ```ts
 import { searchStream } from "agent-web-search";

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createSearchClient,
@@ -15,6 +15,8 @@ const jsonResponse = (body: unknown, init: ResponseInit = {}): Response =>
     headers: { "content-type": "application/json", ...(init.headers ?? {}) },
     ...init,
   });
+
+afterEach(() => vi.useRealTimers());
 
 describe("createSearchClient", () => {
   it("fans out to configured engines and isolates HTTP failures", async () => {
@@ -90,6 +92,7 @@ describe("createSearchClient", () => {
   });
 
   it("retries GDELT plain-text rate limits and preserves the final response", async () => {
+    vi.useFakeTimers();
     const onRetry = vi.fn();
     const fetch = vi
       .fn()
@@ -107,13 +110,16 @@ describe("createSearchClient", () => {
       { fetch: fetch as typeof globalThis.fetch },
     );
 
-    const response = await client.search({ query: "espresso" });
+    const pending = client.search({ query: "espresso" });
+    await vi.runAllTimersAsync();
+    const response = await pending;
     expect(response.gdelt?.ok).toBe(true);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
   it("does not retry GDELT syntax errors and keeps parsed retries independent of HTTP statuses", async () => {
+    vi.useFakeTimers();
     const syntaxFetch = vi.fn(
       async () => new Response("Invalid query syntax", { status: 200 }),
     );
@@ -137,7 +143,9 @@ describe("createSearchClient", () => {
       },
       { fetch: limitedFetch as typeof globalThis.fetch },
     );
-    const limitedResult = (await limitedClient.search({ query: "bad" })).gdelt;
+    const pending = limitedClient.search({ query: "bad" });
+    await vi.runAllTimersAsync();
+    const limitedResult = (await pending).gdelt;
     expect(limitedResult?.ok).toBe(false);
     expect(!limitedResult?.ok && limitedResult?.error.kind).toBe("rate_limit");
     expect(limitedFetch).toHaveBeenCalledTimes(3);

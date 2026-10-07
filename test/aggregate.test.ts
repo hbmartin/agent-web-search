@@ -318,6 +318,54 @@ describe("formatForLLM", () => {
 });
 
 describe("provider warnings in LLM output", () => {
+  it.each(["markdown", "xml"] as const)(
+    "omits redundant unsupported warnings only in %s rendering",
+    (format) => {
+      const unsupported = [
+        {
+          code: "unsupported_param",
+          message: "custom does not support language",
+          param: "language",
+        },
+        {
+          code: "unsupported_param",
+          message: "custom does not support country",
+          param: "country",
+        },
+      ];
+      const distinct = {
+        code: "clamped_param",
+        message: "Count was reduced",
+        param: "count",
+      };
+      const failed: EngineResult = {
+        ok: false,
+        engine: "custom",
+        error: {
+          kind: "unsupported",
+          message: unsupported.map((warning) => warning.message).join("; "),
+          status: null,
+          retryable: false,
+        },
+        metadata: {
+          ...success("custom", []).metadata,
+          warnings: [...unsupported, distinct],
+        },
+      };
+      const aggregated = aggregate({ custom: failed });
+      const output = formatForLLM(aggregated, { format });
+      expect(output.match(/custom does not support language/g)).toHaveLength(1);
+      expect(output.match(/custom does not support country/g)).toHaveLength(1);
+      expect(output).toContain("Count was reduced");
+      expect(aggregated.warnings?.custom).toEqual([...unsupported, distinct]);
+      expect(failed.metadata.warnings).toEqual([...unsupported, distinct]);
+      failed.error.message = "Different unsupported failure";
+      expect(formatForLLM({ custom: failed }, { format })).toContain(
+        "custom does not support language",
+      );
+    },
+  );
+
   it("aggregates warnings from successful and failed engines without duplicates", () => {
     const warning = {
       code: "provider_param_conflict",

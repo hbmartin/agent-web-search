@@ -333,11 +333,13 @@ describe("parsed response retry contract", () => {
     },
     { text: "Unexpected HTML response", kind: "parse", requests: 1 },
   ])("classifies GDELT $text", async ({ text, kind, requests }) => {
+    vi.useFakeTimers();
     const fetch = vi.fn(async () => new Response(text));
-    const response = await createSearchClient(
-      { gdelt: { retry } },
-      { fetch },
-    ).search({ query: "q" });
+    const pending = createSearchClient({ gdelt: { retry } }, { fetch }).search({
+      query: "q",
+    });
+    await vi.runAllTimersAsync();
+    const response = await pending;
     expect(response.gdelt).toMatchObject({ ok: false, error: { kind } });
     expect(fetch).toHaveBeenCalledTimes(requests);
   });

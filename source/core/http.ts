@@ -12,8 +12,8 @@ import type {
 } from "../types/index.js";
 import {
   type AttemptLease,
-  DispatchDenied,
   type DispatchGate,
+  isDispatchDenied,
 } from "./gate.js";
 import {
   deduplicateWarnings,
@@ -31,11 +31,19 @@ export const adapterError = (
   status: number | null = null,
 ): SearchEngineError => ({
   kind,
-  message: `${message}: ${cause instanceof Error ? cause.message : String(cause)}`,
+  message: `${message}: ${thrownMessage(cause)}`,
   status,
   retryable: false,
   cause,
 });
+
+const thrownMessage = (cause: unknown): string => {
+  try {
+    return String(cause instanceof Error ? cause.message : cause);
+  } catch {
+    return "Unknown error";
+  }
+};
 
 export const buildUrl = (request: HttpRequest): string => {
   const url = new URL(request.url);
@@ -227,6 +235,22 @@ export const executeWithRetries = async (input: {
     jitter: true,
     ...input.config.retry,
   };
+  let lastFailure: EngineFailure | undefined;
+  const suppressRetry = (
+    previous: EngineFailure,
+    reason: string,
+  ): EngineFailure => ({
+    ...previous,
+    metadata: {
+      ...previous.metadata,
+      latencyMs: Date.now() - start,
+      warnings: deduplicateWarnings([
+        ...previous.metadata.warnings,
+        ...input.warnings,
+        { code: "retry_suppressed", message: `Retry suppressed: ${reason}` },
+      ]),
+    },
+  });
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     if (input.signal?.aborted) {
@@ -350,26 +374,25 @@ export const executeWithRetries = async (input: {
         retryError = error;
       }
     } catch (cause) {
-      const error =
-        cause instanceof DispatchDenied
-          ? cause.error
-          : input.signal?.aborted
-            ? networkError("network", "Request aborted", cause, false)
-            : parsing
-              ? adapterError(
-                  "parse",
-                  "Could not parse response",
-                  cause,
-                  response?.status ?? null,
-                )
-              : timedOut
-                ? networkError("timeout", "Request timed out", cause)
-                : networkError("network", "Request failed", cause);
+      if (isDispatchDenied(cause) && lastFailure) {
+        return suppressRetry(lastFailure, cause.error.message);
+      }
+      const error = isDispatchDenied(cause)
+        ? cause.error
+        : input.signal?.aborted
+          ? networkError("network", "Request aborted", cause, false)
+          : parsing
+            ? adapterError(
+                "parse",
+                "Could not parse response",
+                cause,
+                response?.status ?? null,
+              )
+            : timedOut
+              ? networkError("timeout", "Request timed out", cause)
+              : networkError("network", "Request failed", cause);
       result = failure(error, response, rateLimit, raw);
-      if (
-        cause instanceof DispatchDenied ||
-        !shouldRetry(error, attempt, maxRetries)
-      ) {
+      if (isDispatchDenied(cause) || !shouldRetry(error, attempt, maxRetries)) {
         return result;
       }
       retryError = error;
@@ -379,8 +402,21 @@ export const executeWithRetries = async (input: {
       lease?.release();
     }
     if (retryError) {
+      if (result && !result.ok) {
+        lastFailure = result;
+      }
       try {
-        await delayForRetry({
+        if (input.signal?.aborted) {
+          throw input.signal.reason;
+        }
+        const denial = input.gate?.denial(
+          input.engine,
+          input.config.costPerRequestUsd ?? 0,
+        );
+        if (denial && lastFailure) {
+          return suppressRetry(lastFailure, denial.message);
+        }
+        const suppressed = await delayForRetry({
           attempt,
           error: retryError,
           response,
@@ -389,6 +425,9 @@ export const executeWithRetries = async (input: {
           engine: input.engine,
           signal: input.signal,
         });
+        if (suppressed && lastFailure) {
+          return suppressRetry(lastFailure, suppressed);
+        }
       } catch (cause) {
         return failure(
           networkError(
@@ -476,7 +515,19 @@ const delayForRetry = async (input: {
   hooks?: TelemetryHooks;
   engine: string;
   signal?: AbortSignal;
-}): Promise<void> => {
+}): Promise<string | undefined> => {
+  if (input.signal?.aborted) {
+    throw input.signal.reason;
+  }
+  const minimum =
+    typeof input.error.retryAfterMs === "number" &&
+    Number.isSafeInteger(input.error.retryAfterMs) &&
+    input.error.retryAfterMs >= 0
+      ? input.error.retryAfterMs
+      : 0;
+  if (minimum > input.retryPolicy.maxDelayMs) {
+    return `Provider minimum retry delay of ${minimum}ms exceeds maxDelayMs of ${input.retryPolicy.maxDelayMs}ms`;
+  }
   const retryAfterMs = parseRetryAfterMs(
     input.response?.headers.get("retry-after") ?? null,
   );
@@ -490,10 +541,12 @@ const delayForRetry = async (input: {
   const jittered = input.retryPolicy.jitter
     ? Math.floor(capped / 2 + Math.random() * (capped / 2))
     : capped;
-  const delayMs =
+  const delayMs = Math.max(
+    minimum,
     retryAfterMs === undefined
       ? jittered
-      : Math.min(input.retryPolicy.maxDelayMs, retryAfterMs);
+      : Math.min(input.retryPolicy.maxDelayMs, retryAfterMs),
+  );
 
   safeHook(input.hooks, "onRetry", {
     engine: input.engine,
@@ -522,6 +575,7 @@ const delayForRetry = async (input: {
       abortRetry();
     }
   });
+  return undefined;
 };
 
 const makeHttpFailure = (input: {

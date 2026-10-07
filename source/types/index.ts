@@ -135,6 +135,7 @@ export interface TelemetryHooks {
     latencyMs: number;
     rateLimit?: RateLimit;
   }): void;
+  /** Reports a scheduled retry; later gate changes or cancellation can prevent dispatch. */
   onRetry?(ctx: {
     engine: string;
     attempt: number;
@@ -159,6 +160,7 @@ export const EngineConfigSchema = z
   .object({
     apiKey: z.string().min(1).optional(),
     baseUrl: z.string().url().optional(),
+    /** Total network timeout for ordinary requests; connection and body-read idle timeout for native streams. Default 30000. */
     timeoutMs: z.number().int().positive().optional(),
     maxRetries: z.number().int().nonnegative().optional(),
     retry: RetryPolicySchema.optional(),
@@ -293,6 +295,8 @@ export const SearchEngineErrorSchema = z
     message: z.string(),
     status: z.number().nullable(),
     retryable: z.boolean(),
+    /** Minimum retry delay; retries stop if this exceeds retry.maxDelayMs. */
+    retryAfterMs: z.number().int().nonnegative().optional(),
     cause: z.unknown().optional(),
     raw: z.unknown().optional(),
   })

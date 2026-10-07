@@ -1,13 +1,10 @@
 import type {
   CostBudget,
   EngineConfig,
-  EngineFailure,
   EngineResult,
   RateLimit,
   SearchEngineError,
-  Warning,
 } from "../types/index.js";
-import { makeFailure, makeMetadata } from "./utils.js";
 
 export class DispatchDenied extends Error {
   readonly error: SearchEngineError;
@@ -17,6 +14,14 @@ export class DispatchDenied extends Error {
     this.error = error;
   }
 }
+
+export const isDispatchDenied = (cause: unknown): cause is DispatchDenied => {
+  try {
+    return cause instanceof DispatchDenied;
+  } catch {
+    return false;
+  }
+};
 
 export interface AttemptLease {
   dispatched(): void;
@@ -94,15 +99,18 @@ export class DispatchGate {
     config: EngineConfig,
     signal?: AbortSignal,
   ): AttemptLease | Promise<AttemptLease> {
-    throwIfAborted(signal);
+    const estimate = config.costPerRequestUsd ?? 0;
+    const check = () => {
+      throwIfAborted(signal);
+      const denial = this.denial(engine, estimate);
+      if (denial) {
+        throw new DispatchDenied(denial);
+      }
+    };
+    check();
     const reserve = (release: () => void): AttemptLease => {
       try {
-        throwIfAborted(signal);
-        const estimate = config.costPerRequestUsd ?? 0;
-        const denial = this.denial(engine, estimate);
-        if (denial) {
-          throw new DispatchDenied(denial);
-        }
+        check();
         this.#reservedUsd += estimate;
         let dispatched = false;
         let settled = false;
@@ -139,53 +147,52 @@ export class DispatchGate {
     if (!config.throttle) {
       return reserve(() => undefined);
     }
-    return this.acquire(engine, config, signal).then(reserve);
+    return this.#acquire(engine, config.throttle, signal, check, reserve);
   }
 
   /**
-   * Waits for a concurrency slot and the pacing interval, then returns a
-   * release function. Callers must release in a finally block.
+   * Waits without reserving cost, then atomically admits and claims pacing.
    */
-  async acquire(
+  async #acquire(
     engine: string,
-    config: EngineConfig,
-    signal?: AbortSignal,
-  ): Promise<() => void> {
-    const throttle = config.throttle;
-    if (!throttle) {
-      return () => undefined;
-    }
-
+    throttle: NonNullable<EngineConfig["throttle"]>,
+    signal: AbortSignal | undefined,
+    check: () => void,
+    reserve: (release: () => void) => AttemptLease,
+  ): Promise<AttemptLease> {
     const state = this.#state(engine);
     const maxConcurrent = throttle.maxConcurrent ?? Number.POSITIVE_INFINITY;
 
     while (state.active >= maxConcurrent) {
+      check();
       await waitForSlot(state, signal);
     }
     state.active += 1;
 
-    try {
-      const minIntervalMs = throttle.minIntervalMs ?? 0;
-      if (minIntervalMs > 0) {
-        const now = Date.now();
-        const startAt = Math.max(now, state.nextStartAt);
-        state.nextStartAt = startAt + minIntervalMs;
-        if (startAt > now) {
-          await sleep(startAt - now, signal);
-        }
-      }
-    } catch (cause) {
-      this.#release(state);
-      throw cause;
-    }
-
     let released = false;
-    return () => {
+    const release = () => {
       if (!released) {
         released = true;
         this.#release(state);
       }
     };
+    try {
+      const minIntervalMs = throttle.minIntervalMs ?? 0;
+      while (true) {
+        check();
+        const now = Date.now();
+        if (minIntervalMs > 0 && state.nextStartAt > now) {
+          await sleep(state.nextStartAt - now, signal);
+          continue;
+        }
+        const lease = reserve(release);
+        state.nextStartAt = now + minIntervalMs;
+        return lease;
+      }
+    } catch (cause) {
+      release();
+      throw cause;
+    }
   }
 
   /** Update provider quota as soon as response headers are available. */
@@ -198,19 +205,6 @@ export class DispatchGate {
     } else if (rateLimit && (rateLimit.remaining ?? 0) > 0) {
       this.#state(engine).blockedUntilMs = null;
     }
-  }
-
-  failure(engine: string, error: SearchEngineError, warnings: Warning[]) {
-    return makeFailure({
-      engine,
-      error,
-      metadata: makeMetadata({
-        engine,
-        latencyMs: 0,
-        httpStatus: null,
-        warnings,
-      }),
-    }) as EngineFailure;
   }
 
   #state(engine: string): EngineState {

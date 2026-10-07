@@ -119,10 +119,11 @@ export const gdeltAdapter: EngineAdapter = {
         error: {
           kind,
           message: excerpt
-            ? `gdelt: ${excerpt}`
-            : "gdelt returned an empty or non-object response for format=json",
+            ? `${ctx.engine}: ${excerpt}`
+            : `${ctx.engine} returned an empty or non-object response for format=json`,
           status: response.status,
           retryable: kind === "rate_limit",
+          ...(kind === "rate_limit" ? { retryAfterMs: 5000 } : {}),
           ...(ctx.includeRaw ? { raw } : {}),
         },
         metadata: makeMetadata({
