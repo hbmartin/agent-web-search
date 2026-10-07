@@ -37,9 +37,15 @@ Node builtins. CI enforces this with `pnpm check:browser`.
    `buildRequest` and `parseResponse` and declare honest `capabilities` —
    anything the provider can't do must be `false` so the client can emit
    `unsupported_param` warnings instead of silently dropping params.
-2. **Pick the right config schema.** Use `KeyedEngineConfigSchema` when the
+2. **Pick the right config and native parameter schemas.** Use `KeyedEngineConfigSchema` when the
    provider needs an API key; extend `EngineConfigSchema` for keyless or
-   self-hosted engines (see `searxng.ts`).
+   self-hosted engines (see `searxng.ts`). Declare optional `paramsSchema` on the adapter
+   to validate native defaults and overrides, preserving unknown fields. Keep count
+   caps and domain rules with the adapter, and use its registered `this.id` for
+   overrides. Opt into 2xx parsed-failure retries with `retryParsedFailures: true`
+   only when a repeat request is appropriate.
+   For native streams, report request/response progress through the supplied hooks
+   and yield one terminal `done` result; the client owns error and settlement hooks.
 3. **Register it.** Add the adapter to `builtInAdapters` and the exports in
    `source/adapters/index.ts`, add the engine id to `builtInEngineIds` in
    `source/types/index.ts`, and re-export from `source/index.ts`.

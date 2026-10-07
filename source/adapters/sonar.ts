@@ -12,7 +12,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   mmddyyyy,
   normalizeDate,
   safeHook,
@@ -30,11 +29,16 @@ import type {
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
 
+import { createParamsSchema, mergeAdapterParams } from "./shared.js";
+
 const endpoint = "https://api.perplexity.ai/v1/sonar";
 
 export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "sonar",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({
+    domains: { search_domain_filter: false },
+  }),
   supportsStreaming: true,
   capabilities: {
     answer: true,
@@ -54,7 +58,7 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
     verticals: ["web"],
   },
   buildRequest(input, config) {
-    return buildSonarRequest(input, config, false);
+    return buildSonarRequest(this, input, config, false);
   },
   parseResponse(response, ctx) {
     const raw = response.raw;
@@ -82,10 +86,10 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
   },
   async *openStream(input, config, ctx): AsyncIterable<EngineStreamEvent> {
     const start = Date.now();
-    const request = buildSonarRequest(input, config, true);
+    const request = buildSonarRequest(this, input, config, true);
     const url = buildUrl(request);
     safeHook(ctx.hooks, "onRequest", {
-      engine: "sonar",
+      engine: this.id,
       url,
       attempt: 1,
       request: {
@@ -107,7 +111,7 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
     });
     const rateLimit = parseRateLimit(response.headers);
     safeHook(ctx.hooks, "onResponse", {
-      engine: "sonar",
+      engine: this.id,
       status: response.status,
       latencyMs: Date.now() - start,
       ...(rateLimit ? { rateLimit } : {}),
@@ -122,10 +126,10 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
         raw,
       );
       const result = makeFailure({
-        engine: "sonar",
+        engine: this.id,
         error,
         metadata: makeMetadata({
-          engine: "sonar",
+          engine: this.id,
           latencyMs: Date.now() - start,
           httpStatus: response.status,
           rateLimit,
@@ -134,8 +138,8 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
           includeRaw: config.includeRaw,
         }),
       });
-      yield { engine: "sonar", type: "error", error };
-      yield { engine: "sonar", type: "done", result };
+      yield { engine: this.id, type: "error", error };
+      yield { engine: this.id, type: "done", result };
       return;
     }
 
@@ -143,9 +147,10 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
       const result = streamFailure(
         "Streaming response body was empty",
         ctx.warnings,
+        this.id,
       );
-      yield { engine: "sonar", type: "error", error: result.error };
-      yield { engine: "sonar", type: "done", result };
+      yield { engine: this.id, type: "error", error: result.error };
+      yield { engine: this.id, type: "done", result };
       return;
     }
 
@@ -159,14 +164,14 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
       );
       if (delta) {
         text += delta;
-        yield { engine: "sonar", type: "answer_delta", text: delta };
+        yield { engine: this.id, type: "answer_delta", text: delta };
       }
     }
 
     const results = searchResults(latestRaw);
     const answer = answerFromRaw(latestRaw, results, text);
     const metadata = makeMetadata({
-      engine: "sonar",
+      engine: this.id,
       latencyMs: Date.now() - start,
       httpStatus: response.status,
       totalResults: results.length,
@@ -178,21 +183,22 @@ export const sonarAdapter: EngineAdapter<KeyedEngineConfig> = {
     });
     const result: EngineResult = {
       ok: true,
-      engine: "sonar",
+      engine: this.id,
       results,
       answer,
       metadata,
       ...(config.includeRaw ? { raw: latestRaw } : {}),
     };
 
-    yield { engine: "sonar", type: "answer_done", answer };
-    yield { engine: "sonar", type: "results", results };
-    yield { engine: "sonar", type: "metadata", metadata };
-    yield { engine: "sonar", type: "done", result };
+    yield { engine: this.id, type: "answer_done", answer };
+    yield { engine: this.id, type: "results", results };
+    yield { engine: this.id, type: "metadata", metadata };
+    yield { engine: this.id, type: "done", result };
   },
 };
 
 const buildSonarRequest = (
+  adapter: Pick<EngineAdapter, "id" | "paramsSchema">,
   input: {
     query: string | string[];
     dateRange?: { start?: string; end?: string };
@@ -220,7 +226,10 @@ const buildSonarRequest = (
     search_recency_filter: input.dateRange ? undefined : input.freshness,
     search_after_date_filter: mmddyyyy(input.dateRange?.start),
     search_before_date_filter: mmddyyyy(input.dateRange?.end),
-    search_domain_filter: domainFilter.length > 0 ? domainFilter : undefined,
+    search_domain_filter:
+      input.includeDomains !== undefined || input.excludeDomains !== undefined
+        ? domainFilter
+        : undefined,
     search_language_filter: input.language ? [input.language] : undefined,
   };
 
@@ -228,7 +237,7 @@ const buildSonarRequest = (
     method: "POST",
     url: config.baseUrl ?? endpoint,
     headers: { Authorization: `Bearer ${config.apiKey}` },
-    body: mergeParams("sonar", config, mapped, input.overrides),
+    body: mergeAdapterParams(adapter, config, mapped, input.overrides),
   };
 };
 
@@ -386,12 +395,13 @@ const get = (value: unknown, path: (number | string)[]): unknown =>
 const streamFailure = (
   message: string,
   warnings: Warning[],
+  engine = "sonar",
 ): Extract<EngineResult, { ok: false }> => ({
   ok: false,
-  engine: "sonar",
+  engine,
   error: { kind: "parse", message, status: null, retryable: false },
   metadata: makeMetadata({
-    engine: "sonar",
+    engine,
     latencyMs: 0,
     httpStatus: null,
     warnings,

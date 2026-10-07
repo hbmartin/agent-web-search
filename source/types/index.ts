@@ -114,6 +114,7 @@ export const RetryPolicySchema = z
     maxDelayMs: z.number().int().positive().optional(),
     factor: z.number().positive().optional(),
     jitter: z.boolean().optional(),
+    /** Allowed non-2xx HTTP retry statuses; does not filter parsed or network failures. */
     retryStatuses: z.array(z.number().int().positive()).optional(),
   })
   .strict();
@@ -373,10 +374,10 @@ export interface StrategyOptions {
 
 export interface CostBudget {
   /**
-   * Hard ceiling on the cumulative estimated cost of searches made through
-   * one client. Once reached, engines fail fast with a "quota" error instead
-   * of issuing requests. Cost per request is taken from provider-reported
-   * usage when available, else from the engine's costPerRequestUsd config.
+   * Ceiling on spent cost plus per-attempt estimates reserved before dispatch.
+   * Provider-reported usage reconciles estimates after a response. Missing
+   * estimates reserve zero, so unestimated requests or actual charges above
+   * the estimate can exceed this ceiling.
    */
   maxCostUsd: number;
 }
@@ -464,6 +465,10 @@ export interface EngineAdapter<Config extends EngineConfig = EngineConfig> {
   id: string;
   capabilities: Capabilities;
   configSchema: ZodType<Config>;
+  /** Validate provider-native defaults and overrides, independent of registration id. */
+  paramsSchema?: ZodType<Record<string, unknown>>;
+  /** Opt into retries of retryable failures parsed from successful HTTP responses. */
+  retryParsedFailures?: boolean;
   buildRequest(
     input: QueryInput,
     config: Config,

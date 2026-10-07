@@ -8,20 +8,26 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   queryParams,
   singleQuery,
 } from "../core/utils.js";
 import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
-import { withDomainOperators } from "./shared.js";
+import {
+  createParamsSchema,
+  mergeAdapterParams,
+  withDomainOperators,
+} from "./shared.js";
 
 const endpoint = "https://api.search.brave.com/res/v1/web/search";
+
+const countRule = { param: "count", max: 20 };
 
 export const braveAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "brave",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({ count: countRule }),
   capabilities: {
     answer: false,
     content: false,
@@ -57,19 +63,20 @@ export const braveAdapter: EngineAdapter<KeyedEngineConfig> = {
       safesearch: input.safeSearch,
       extra_snippets: true,
     };
-    const params = mergeParams(
-      "brave",
+    const params = mergeAdapterParams(
+      this,
       config,
       mapped,
       input.overrides,
       warnings,
+      countRule,
     );
 
     return {
       method: "GET",
       url: config.baseUrl ?? endpoint,
       headers: { "X-Subscription-Token": config.apiKey },
-      query: queryParams("brave", params, warnings),
+      query: queryParams(this.id, params, warnings),
     };
   },
   parseResponse(response, ctx) {

@@ -8,7 +8,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   singleQuery,
   truncateContent,
 } from "../core/utils.js";
@@ -19,13 +18,23 @@ import type {
   ResultContent,
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
-import { resolveDomainFilters } from "./shared.js";
+import {
+  createParamsSchema,
+  mergeAdapterParams,
+  resolveDomainFilters,
+} from "./shared.js";
 
 const endpoint = "https://api.firecrawl.dev/v2/search";
+
+const countRule = { param: "limit", max: 100 };
 
 export const firecrawlAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "firecrawl",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({
+    count: countRule,
+    domains: { includeDomains: false, excludeDomains: false },
+  }),
   capabilities: {
     answer: false,
     content: true,
@@ -56,18 +65,18 @@ export const firecrawlAdapter: EngineAdapter<KeyedEngineConfig> = {
       excludeDomains: input.excludeDomains,
       scrapeOptions: options ? scrapeOptions(options, warnings) : undefined,
     };
-    const merged = mergeParams(
-      "firecrawl",
+    const merged = mergeAdapterParams(
+      this,
       config,
       mapped,
       input.overrides,
       warnings,
+      countRule,
     );
     resolveDomainFilters({
-      engine: "firecrawl",
+      engine: this.id,
       params: merged,
       query: input,
-      config,
       includeKey: "includeDomains",
       excludeKey: "excludeDomains",
       warnings,

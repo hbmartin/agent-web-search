@@ -5,11 +5,12 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   singleQuery,
 } from "../core/utils.js";
 import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
+
+import { mergeAdapterParams } from "./shared.js";
 
 const endpoint = "https://api.ceramic.ai/search";
 
@@ -34,8 +35,8 @@ export const ceramicAdapter: EngineAdapter<KeyedEngineConfig> = {
     verticals: ["web"],
   },
   buildRequest(input, config) {
-    const body = mergeParams(
-      "ceramic",
+    const body = mergeAdapterParams(
+      this,
       config,
       { query: singleQuery(input.query) },
       input.overrides,

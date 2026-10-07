@@ -6,7 +6,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   numberOrNull,
   queryParams,
@@ -14,6 +13,8 @@ import {
 } from "../core/utils.js";
 import type { EngineAdapter } from "../types/index.js";
 import { EngineConfigSchema } from "../types/index.js";
+
+import { createParamsSchema, mergeAdapterParams } from "./shared.js";
 
 const endpoint = "https://hn.algolia.com/api/v1/search";
 const itemUrl = "https://news.ycombinator.com/item?id=";
@@ -66,9 +67,12 @@ const engineDefaults = { tags: "story" };
  * The index has no domain facet, so domain filters are unsupported rather
  * than emulated: Algolia has no `site:` operator to fall back on.
  */
+const countRule = { param: "hitsPerPage", min: 0, max: 1000 };
+
 export const hackernewsAdapter: EngineAdapter = {
   id: "hackernews",
   configSchema: EngineConfigSchema,
+  paramsSchema: createParamsSchema({ count: countRule }),
   capabilities: {
     answer: false,
     content: false,
@@ -101,7 +105,14 @@ export const hackernewsAdapter: EngineAdapter = {
     };
     const merged: Record<string, unknown> = {
       ...engineDefaults,
-      ...mergeParams("hackernews", config, mapped, input.overrides, warnings),
+      ...mergeAdapterParams(
+        this,
+        config,
+        mapped,
+        input.overrides,
+        warnings,
+        countRule,
+      ),
     };
 
     return {
@@ -109,7 +120,7 @@ export const hackernewsAdapter: EngineAdapter = {
       url: config.baseUrl ?? endpoint,
       // engineDefaults sits beneath config.defaults so `tags` stays
       // overridable through config rather than only through overrides.
-      query: queryParams("hackernews", merged, warnings),
+      query: queryParams(this.id, merged, warnings),
     };
   },
   parseResponse(response, ctx) {

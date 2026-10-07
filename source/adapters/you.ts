@@ -9,7 +9,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   queryParams,
   singleQuery,
@@ -23,13 +22,23 @@ import type {
   Warning,
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
-import { resolveDomainFilters } from "./shared.js";
+import {
+  createParamsSchema,
+  mergeAdapterParams,
+  resolveDomainFilters,
+} from "./shared.js";
 
 const endpoint = "https://ydc-index.io/v1/search";
+
+const countRule = { param: "count" };
 
 export const youAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "you",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({
+    count: countRule,
+    domains: { include_domains: true, exclude_domains: true },
+  }),
   capabilities: {
     answer: false,
     content: true,
@@ -63,12 +72,18 @@ export const youAdapter: EngineAdapter<KeyedEngineConfig> = {
       exclude_domains: input.excludeDomains,
       ...(options ? livecrawlParams(options, warnings) : {}),
     };
-    const merged = mergeParams("you", config, mapped, input.overrides);
+    const merged = mergeAdapterParams(
+      this,
+      config,
+      mapped,
+      input.overrides,
+      warnings,
+      countRule,
+    );
     resolveDomainFilters({
-      engine: "you",
+      engine: this.id,
       params: merged,
       query: input,
-      config,
       includeKey: "include_domains",
       excludeKey: "exclude_domains",
       allowCsvStrings: true,
@@ -89,7 +104,7 @@ export const youAdapter: EngineAdapter<KeyedEngineConfig> = {
       url: config.baseUrl ?? endpoint,
       headers: { "X-API-Key": config.apiKey },
       ...(method === "GET"
-        ? { query: stringifyArrays(merged, warnings) }
+        ? { query: stringifyArrays(this.id, merged, warnings) }
         : { body: merged }),
     };
   },
@@ -172,13 +187,14 @@ const shouldPost = (params: Record<string, unknown>): boolean =>
   Object.values(params).some(Array.isArray);
 
 const stringifyArrays = (
+  engine: string,
   params: Record<string, unknown>,
   warnings: Warning[],
 ): Record<string, boolean | number | string | undefined> => {
   const stringified: Record<string, boolean | number | string | undefined> = {};
 
   for (const [key, value] of Object.entries(
-    queryParams("you", params, warnings),
+    queryParams(engine, params, warnings),
   )) {
     stringified[key] = Array.isArray(value) ? value.join(",") : value;
   }

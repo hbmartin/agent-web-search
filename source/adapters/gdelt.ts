@@ -7,20 +7,23 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   queryParams,
   singleQuery,
 } from "../core/utils.js";
 import type { EngineAdapter } from "../types/index.js";
 import { EngineConfigSchema } from "../types/index.js";
-import { withDomainOperators } from "./shared.js";
+import {
+  createParamsSchema,
+  mergeAdapterParams,
+  withDomainOperators,
+} from "./shared.js";
 
 const endpoint = "https://api.gdeltproject.org/api/v2/doc/doc";
 
 const rateLimitNotice =
-  /\b(?:rate[\s-]*limit(?:ed|ing|s)?|too many (?:requests|queries)|limit of \d+ (?:requests|queries))\b/i;
+  /\b(?:rate[\s-]*limit(?:ed|ing|s)?|too many requests|limit of \d+ requests|please limit requests to one every \d+ seconds)\b/i;
 const queryErrorNotice =
-  /\b(?:syntax error|invalid query|malformed query|query (?:syntax|must|requires|cannot|was too short|is invalid|was invalid)|invalid (?:operator|term)|a maximum of \d+ records)\b/i;
+  /\b(?:syntax error|invalid query|malformed query|query (?:syntax|must|requires|cannot|was too short|is invalid|was invalid|contained)|(?:one or more of your keywords|the specified phrase) (?:were|is) too short|parentheses may only|invalid (?:operator|term)|a maximum of \d+ records)\b/i;
 
 /**
  * GDELT 2.0 Document API. Keyless and free, covering global news in 65+
@@ -40,9 +43,13 @@ const queryErrorNotice =
  * Domain filters use GDELT's suffix-matching `domain:` operator, so a filter
  * can also match longer domain names that end with the requested value.
  */
+const countRule = { param: "maxrecords", max: 250 };
+
 export const gdeltAdapter: EngineAdapter = {
   id: "gdelt",
   configSchema: EngineConfigSchema,
+  retryParsedFailures: true,
+  paramsSchema: createParamsSchema({ count: countRule }),
   capabilities: {
     answer: false,
     content: false,
@@ -77,18 +84,19 @@ export const gdeltAdapter: EngineAdapter = {
       startdatetime: gdeltDateTime(start, "000000"),
       enddatetime: gdeltDateTime(input.dateRange?.end, "235959"),
     };
-    const merged = mergeParams(
-      "gdelt",
+    const merged = mergeAdapterParams(
+      this,
       config,
       mapped,
       input.overrides,
       warnings,
+      countRule,
     );
 
     return {
       method: "GET",
       url: config.baseUrl ?? endpoint,
-      query: queryParams("gdelt", merged, warnings),
+      query: queryParams(this.id, merged, warnings),
     };
   },
   parseResponse(response, ctx) {
@@ -96,13 +104,15 @@ export const gdeltAdapter: EngineAdapter = {
     if (!isObject(raw)) {
       const excerpt =
         typeof raw === "string"
-          ? raw.replaceAll(/\s+/g, " ").trim().slice(0, 500)
+          ? Array.from(
+              raw.slice(0, 2048).replaceAll(/\s+/g, " ").trim().slice(0, 500),
+            ).join("")
           : "";
       const kind =
-        excerpt && !/^[[{]/.test(excerpt) && rateLimitNotice.test(excerpt)
-          ? "rate_limit"
-          : excerpt && !/^[[{]/.test(excerpt) && queryErrorNotice.test(excerpt)
-            ? "bad_request"
+        excerpt && !/^[[{]/.test(excerpt) && queryErrorNotice.test(excerpt)
+          ? "bad_request"
+          : excerpt && !/^[[{]/.test(excerpt) && rateLimitNotice.test(excerpt)
+            ? "rate_limit"
             : "parse";
       return makeFailure({
         engine: ctx.engine,

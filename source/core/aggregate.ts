@@ -3,7 +3,10 @@ import type {
   SearchEngineError,
   SearchResponse,
   SearchResult,
+  Warning,
 } from "../types/index.js";
+
+import { deduplicateWarnings } from "./utils.js";
 
 export interface AggregatedResult extends SearchResult {
   /** Engines that returned this URL, in response order. */
@@ -34,6 +37,8 @@ export interface AggregatedSearchResponse {
   succeeded: string[];
   /** Errors keyed by failed engine. */
   failed: Record<string, SearchEngineError>;
+  /** Provider warnings, including filters dropped during request construction. */
+  warnings?: Record<string, Warning[]>;
 }
 
 const trackingParamPattern =
@@ -82,8 +87,13 @@ export const aggregate = (
   const answers: Record<string, Answer> = {};
   const succeeded: string[] = [];
   const failed: Record<string, SearchEngineError> = {};
+  const warnings = new Map<string, Warning[]>();
 
   for (const [engine, result] of Object.entries(response)) {
+    const unique = deduplicateWarnings(result.metadata.warnings);
+    if (unique.length > 0) {
+      warnings.set(engine, unique);
+    }
     if (!result.ok) {
       failed[engine] = result.error;
       continue;
@@ -138,6 +148,7 @@ export const aggregate = (
     answers,
     succeeded,
     failed,
+    ...(warnings.size > 0 ? { warnings: Object.fromEntries(warnings) } : {}),
   };
 };
 

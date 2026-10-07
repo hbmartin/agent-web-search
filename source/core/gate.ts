@@ -3,10 +3,26 @@ import type {
   EngineConfig,
   EngineFailure,
   EngineResult,
+  RateLimit,
   SearchEngineError,
   Warning,
 } from "../types/index.js";
 import { makeFailure, makeMetadata } from "./utils.js";
+
+export class DispatchDenied extends Error {
+  readonly error: SearchEngineError;
+
+  constructor(error: SearchEngineError) {
+    super(error.message);
+    this.error = error;
+  }
+}
+
+export interface AttemptLease {
+  dispatched(): void;
+  release(): void;
+  settle(result?: EngineResult): void;
+}
 
 interface EngineState {
   active: number;
@@ -26,6 +42,7 @@ export class DispatchGate {
   readonly #respectRateLimits: boolean;
   readonly #states = new Map<string, EngineState>();
   #spentUsd = 0;
+  #reservedUsd = 0;
 
   constructor(options: { budget?: CostBudget; respectRateLimits?: boolean }) {
     if (options.budget) {
@@ -39,11 +56,15 @@ export class DispatchGate {
   }
 
   /** Returns a fail-fast error when the engine must not issue a request now. */
-  denial(engine: string): SearchEngineError | null {
-    if (this.#budget && this.#spentUsd >= this.#budget.maxCostUsd) {
+  denial(engine: string, estimate = 0): SearchEngineError | null {
+    const committed = this.#spentUsd + this.#reservedUsd;
+    if (
+      this.#budget &&
+      committed + estimate > this.#budget.maxCostUsd + 1e-10
+    ) {
       return {
         kind: "quota",
-        message: `Cost budget of $${this.#budget.maxCostUsd} reached (spent ~$${roundUsd(this.#spentUsd)})`,
+        message: `Cost budget of $${this.#budget.maxCostUsd} would be exceeded (spent/reserved ~$${roundUsd(committed)}, next ~$${roundUsd(estimate)})`,
         status: null,
         retryable: false,
       };
@@ -65,6 +86,60 @@ export class DispatchGate {
     }
 
     return null;
+  }
+
+  /** Reserve cost atomically immediately before dispatch; pacing can wait first. */
+  begin(
+    engine: string,
+    config: EngineConfig,
+    signal?: AbortSignal,
+  ): AttemptLease | Promise<AttemptLease> {
+    throwIfAborted(signal);
+    const reserve = (release: () => void): AttemptLease => {
+      try {
+        throwIfAborted(signal);
+        const estimate = config.costPerRequestUsd ?? 0;
+        const denial = this.denial(engine, estimate);
+        if (denial) {
+          throw new DispatchDenied(denial);
+        }
+        this.#reservedUsd += estimate;
+        let dispatched = false;
+        let settled = false;
+        return {
+          dispatched: () => {
+            dispatched = true;
+          },
+          release,
+          settle: (result) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            this.#reservedUsd = Math.max(0, this.#reservedUsd - estimate);
+            if (result) {
+              this.observe(engine, result.metadata.rateLimit);
+            }
+            if (dispatched) {
+              const reported = result?.metadata.usage?.costUsd;
+              this.#spentUsd +=
+                typeof reported === "number" &&
+                Number.isFinite(reported) &&
+                reported >= 0
+                  ? reported
+                  : estimate;
+            }
+          },
+        };
+      } catch (cause) {
+        release();
+        throw cause;
+      }
+    };
+    if (!config.throttle) {
+      return reserve(() => undefined);
+    }
+    return this.acquire(engine, config, signal).then(reserve);
   }
 
   /**
@@ -113,9 +188,8 @@ export class DispatchGate {
     };
   }
 
-  /** Records provider-reported rate limits and accrues estimated cost. */
-  record(engine: string, config: EngineConfig, result: EngineResult): void {
-    const rateLimit = result.metadata.rateLimit;
+  /** Update provider quota as soon as response headers are available. */
+  observe(engine: string, rateLimit: RateLimit | null): void {
     if (rateLimit?.remaining === 0 && rateLimit.resetAt) {
       const resetMs = new Date(rateLimit.resetAt).getTime();
       if (!Number.isNaN(resetMs)) {
@@ -123,11 +197,6 @@ export class DispatchGate {
       }
     } else if (rateLimit && (rateLimit.remaining ?? 0) > 0) {
       this.#state(engine).blockedUntilMs = null;
-    }
-
-    if (result.ok || result.error.kind !== "quota") {
-      this.#spentUsd +=
-        result.metadata.usage?.costUsd ?? config.costPerRequestUsd ?? 0;
     }
   }
 

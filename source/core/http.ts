@@ -11,12 +11,31 @@ import type {
   Warning,
 } from "../types/index.js";
 import {
+  type AttemptLease,
+  DispatchDenied,
+  type DispatchGate,
+} from "./gate.js";
+import {
+  deduplicateWarnings,
   defaultMaxRetries,
   defaultTimeoutMs,
   makeFailure,
   makeMetadata,
   safeHook,
 } from "./utils.js";
+
+export const adapterError = (
+  kind: "bad_request" | "parse",
+  message: string,
+  cause: unknown,
+  status: number | null = null,
+): SearchEngineError => ({
+  kind,
+  message: `${message}: ${cause instanceof Error ? cause.message : String(cause)}`,
+  status,
+  retryable: false,
+  cause,
+});
 
 export const buildUrl = (request: HttpRequest): string => {
   const url = new URL(request.url);
@@ -153,6 +172,8 @@ export const executeWithRetries = async (input: {
   request: HttpRequest;
   config: EngineConfig;
   fetch: FetchLike;
+  gate?: DispatchGate;
+  retryParsedFailures?: boolean;
   hooks?: TelemetryHooks;
   signal?: AbortSignal;
   warnings: Warning[];
@@ -162,108 +183,131 @@ export const executeWithRetries = async (input: {
     rateLimit: RateLimit | null,
   ) => EngineResult;
 }): Promise<EngineResult> => {
+  const start = Date.now();
+  const failure = (
+    error: SearchEngineError,
+    response?: Response,
+    rateLimit: RateLimit | null = null,
+    raw?: unknown,
+  ): EngineResult =>
+    makeHttpFailure({
+      engine: input.engine,
+      error,
+      latencyMs: Date.now() - start,
+      httpStatus: response?.status ?? null,
+      rateLimit,
+      warnings: input.warnings,
+      raw,
+      includeRaw: input.config.includeRaw,
+    });
+  let url: string;
+  let body: string | undefined;
+  let headers: Headers;
+  try {
+    url = buildUrl(input.request);
+    body =
+      input.request.body === undefined
+        ? undefined
+        : JSON.stringify(input.request.body);
+    headers = new Headers({
+      Accept: "application/json",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...input.request.headers,
+    });
+  } catch (cause) {
+    return failure(
+      adapterError("bad_request", "Could not prepare request", cause),
+    );
+  }
   const maxRetries = input.config.maxRetries ?? defaultMaxRetries;
-  const timeoutMs = input.config.timeoutMs ?? defaultTimeoutMs;
   const retryPolicy = {
     initialDelayMs: 250,
     maxDelayMs: 5000,
     factor: 2,
     jitter: true,
-    ...(input.config.retry ?? {}),
+    ...input.config.retry,
   };
-  const url = buildUrl(input.request);
-  const start = Date.now();
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     if (input.signal?.aborted) {
-      return makeHttpFailure({
-        engine: input.engine,
-        error: networkError(
-          "network",
-          "Request aborted",
-          input.signal.reason,
-          false,
-        ),
-        latencyMs: Date.now() - start,
-        httpStatus: null,
-        rateLimit: null,
-        warnings: input.warnings,
-      });
+      return failure(
+        networkError("network", "Request aborted", input.signal.reason, false),
+      );
     }
-
-    const attemptStart = Date.now();
-    safeHook(input.hooks, "onRequest", {
-      engine: input.engine,
-      url,
-      attempt: attempt + 1,
-      request: {
-        method: input.request.method,
-        headers: redactHeaders(input.request.headers),
-        body: input.request.body,
-      },
-    });
-
+    let lease: AttemptLease | undefined;
+    let result: EngineResult | undefined;
+    let response: Response | undefined;
+    let rateLimit: RateLimit | null = null;
+    let raw: unknown;
     let timedOut = false;
+    let parsing = false;
+    let retryError: SearchEngineError | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let abortOriginal: (() => void) | undefined;
-    let cleanedUp = false;
-    const cleanupAttempt = () => {
-      if (cleanedUp) {
-        return;
-      }
-
-      cleanedUp = true;
-      if (timeout) {
+    const cleanup = () => {
+      if (timeout !== undefined) {
         clearTimeout(timeout);
       }
       if (abortOriginal) {
         input.signal?.removeEventListener("abort", abortOriginal);
       }
     };
-
     try {
+      const acquired = input.gate?.begin(
+        input.engine,
+        input.config,
+        input.signal,
+      );
+      // Preserve synchronous fetch dispatch when no throttle needs to wait.
+      lease = acquired instanceof Promise ? await acquired : acquired;
+      if (input.signal?.aborted) {
+        throw input.signal.reason;
+      }
       const controller = new AbortController();
+      const attemptStart = Date.now();
       timeout = setTimeout(() => {
         timedOut = true;
         controller.abort("timeout");
-      }, timeoutMs);
+      }, input.config.timeoutMs ?? defaultTimeoutMs);
       abortOriginal = () => controller.abort(input.signal?.reason);
       input.signal?.addEventListener("abort", abortOriginal, { once: true });
-      if (input.signal?.aborted) {
-        controller.abort(input.signal.reason);
-      }
-
-      // timeoutMs is a total network deadline for an attempt: connection,
-      // headers, and the response body read share the same abort signal.
-      const response = await input.fetch(url, {
-        method: input.request.method,
-        headers: {
-          Accept: "application/json",
-          ...(input.request.body === undefined
-            ? {}
-            : { "Content-Type": "application/json" }),
-          ...(input.request.headers ?? {}),
+      safeHook(input.hooks, "onRequest", {
+        engine: input.engine,
+        url,
+        attempt: attempt + 1,
+        request: {
+          method: input.request.method,
+          headers: redactHeaders(input.request.headers),
+          body: input.request.body,
         },
-        body:
-          input.request.body === undefined
-            ? undefined
-            : JSON.stringify(input.request.body),
+      });
+      if (input.signal?.aborted) {
+        throw input.signal.reason;
+      }
+      lease?.dispatched();
+      response = await input.fetch(url, {
+        method: input.request.method,
+        headers,
+        body,
         signal: controller.signal,
       });
-
+      parsing = true;
+      rateLimit = parseRateLimit(response.headers);
+      input.gate?.observe(input.engine, rateLimit);
+      parsing = false;
       const text = await response.text();
-      const raw = parseResponseText(text);
-      const rateLimit = parseRateLimit(response.headers);
-      const latencyMs = Date.now() - attemptStart;
+      // Only connection, headers, and body consumption share the network timer.
+      cleanup();
+      parsing = true;
+      raw = parseResponseText(text);
       safeHook(input.hooks, "onResponse", {
         engine: input.engine,
         status: response.status,
-        latencyMs,
+        latencyMs: Date.now() - attemptStart,
         ...(rateLimit ? { rateLimit } : {}),
       });
-
       if (response.ok) {
-        const parsed = input.parse(
+        result = input.parse(
           {
             status: response.status,
             headers: response.headers,
@@ -274,120 +318,92 @@ export const executeWithRetries = async (input: {
           Date.now() - start,
           rateLimit,
         );
+        input.warnings.push(...result.metadata.warnings);
+        const warnings = deduplicateWarnings(input.warnings);
+        input.warnings.splice(0, input.warnings.length, ...warnings);
+        result = { ...result, metadata: { ...result.metadata, warnings } };
         if (
-          parsed.ok ||
+          result.ok ||
+          !input.retryParsedFailures ||
+          !shouldRetry(result.error, attempt, maxRetries)
+        ) {
+          return result;
+        }
+        retryError = result.error;
+      } else {
+        const error = classifyHttpError(
+          response.status,
+          response.statusText || `HTTP ${response.status}`,
+          input.config.includeRaw ? raw : undefined,
+        );
+        result = failure(error, response, rateLimit, raw);
+        if (
           !shouldRetry(
-            parsed.error,
+            error,
             attempt,
             maxRetries,
             input.config.retry?.retryStatuses,
           )
         ) {
-          return parsed;
+          return result;
         }
-
-        cleanupAttempt();
+        retryError = error;
+      }
+    } catch (cause) {
+      const error =
+        cause instanceof DispatchDenied
+          ? cause.error
+          : input.signal?.aborted
+            ? networkError("network", "Request aborted", cause, false)
+            : parsing
+              ? adapterError(
+                  "parse",
+                  "Could not parse response",
+                  cause,
+                  response?.status ?? null,
+                )
+              : timedOut
+                ? networkError("timeout", "Request timed out", cause)
+                : networkError("network", "Request failed", cause);
+      result = failure(error, response, rateLimit, raw);
+      if (
+        cause instanceof DispatchDenied ||
+        !shouldRetry(error, attempt, maxRetries)
+      ) {
+        return result;
+      }
+      retryError = error;
+    } finally {
+      cleanup();
+      lease?.settle(result);
+      lease?.release();
+    }
+    if (retryError) {
+      try {
         await delayForRetry({
           attempt,
-          error: parsed.error,
+          error: retryError,
           response,
           retryPolicy,
           hooks: input.hooks,
           engine: input.engine,
           signal: input.signal,
         });
-        continue;
+      } catch (cause) {
+        return failure(
+          networkError(
+            "network",
+            input.signal?.aborted ? "Request aborted" : "Retry delay failed",
+            cause,
+            false,
+          ),
+        );
       }
-
-      const error = classifyHttpError(
-        response.status,
-        response.statusText || `HTTP ${response.status}`,
-        input.config.includeRaw ? raw : undefined,
-      );
-      if (
-        !shouldRetry(
-          error,
-          attempt,
-          maxRetries,
-          input.config.retry?.retryStatuses,
-        )
-      ) {
-        return makeHttpFailure({
-          engine: input.engine,
-          error,
-          latencyMs: Date.now() - start,
-          httpStatus: response.status,
-          rateLimit,
-          warnings: input.warnings,
-          raw,
-          includeRaw: input.config.includeRaw,
-        });
-      }
-
-      cleanupAttempt();
-      await delayForRetry({
-        attempt,
-        error,
-        response,
-        retryPolicy,
-        hooks: input.hooks,
-        engine: input.engine,
-        signal: input.signal,
-      });
-    } catch (cause) {
-      const abortedByCaller = input.signal?.aborted === true;
-      const error = abortedByCaller
-        ? networkError("network", "Request aborted", cause, false)
-        : timedOut
-          ? networkError("timeout", "Request timed out", cause)
-          : networkError("network", "Request failed", cause);
-
-      if (!shouldRetry(error, attempt, maxRetries)) {
-        return makeHttpFailure({
-          engine: input.engine,
-          error,
-          latencyMs: Date.now() - start,
-          httpStatus: null,
-          rateLimit: null,
-          warnings: input.warnings,
-        });
-      }
-
-      cleanupAttempt();
-      try {
-        await delayForRetry({
-          attempt,
-          error,
-          retryPolicy,
-          hooks: input.hooks,
-          engine: input.engine,
-          signal: input.signal,
-        });
-      } catch (delayCause) {
-        return makeHttpFailure({
-          engine: input.engine,
-          error: input.signal?.aborted
-            ? networkError("network", "Request aborted", delayCause, false)
-            : networkError("network", "Request failed", delayCause),
-          latencyMs: Date.now() - start,
-          httpStatus: null,
-          rateLimit: null,
-          warnings: input.warnings,
-        });
-      }
-    } finally {
-      cleanupAttempt();
     }
   }
-
-  return makeHttpFailure({
-    engine: input.engine,
-    error: networkError("network", "Request failed after retries"),
-    latencyMs: Date.now() - start,
-    httpStatus: null,
-    rateLimit: null,
-    warnings: input.warnings,
-  });
+  return failure(
+    networkError("network", "Request failed after retries", undefined, false),
+  );
 };
 
 const parseResponseText = (text: string): unknown => {

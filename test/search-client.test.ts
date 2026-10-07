@@ -113,7 +113,7 @@ describe("createSearchClient", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
-  it("does not retry GDELT syntax errors or excluded HTTP 200 statuses", async () => {
+  it("does not retry GDELT syntax errors and keeps parsed retries independent of HTTP statuses", async () => {
     const syntaxFetch = vi.fn(
       async () => new Response("Invalid query syntax", { status: 200 }),
     );
@@ -130,13 +130,17 @@ describe("createSearchClient", () => {
       async () => new Response("Rate limit exceeded", { status: 200 }),
     );
     const limitedClient = createSearchClient(
-      { gdelt: { retry: { retryStatuses: [429] } } },
+      {
+        gdelt: {
+          retry: { initialDelayMs: 0, jitter: false, retryStatuses: [429] },
+        },
+      },
       { fetch: limitedFetch as typeof globalThis.fetch },
     );
     const limitedResult = (await limitedClient.search({ query: "bad" })).gdelt;
     expect(limitedResult?.ok).toBe(false);
     expect(!limitedResult?.ok && limitedResult?.error.kind).toBe("rate_limit");
-    expect(limitedFetch).toHaveBeenCalledOnce();
+    expect(limitedFetch).toHaveBeenCalledTimes(3);
   });
 
   it("redacts auth headers in request telemetry", async () => {

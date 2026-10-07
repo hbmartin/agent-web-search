@@ -571,7 +571,7 @@ describe("adapter contract fixtures", () => {
           expectedInclude: ["query.example"],
           expectedExclude: undefined,
           dropped: excludeKey,
-          warningParam: id === "you" ? "excludeDomains" : excludeKey,
+          warningParam: "excludeDomains",
         },
         {
           input: {
@@ -584,9 +584,9 @@ describe("adapter contract fixtures", () => {
             apiKey: "test-key",
             defaults: { [includeKey]: ["default.example"] },
           }),
-          expectedInclude: undefined,
-          expectedExclude: ["override-blocked.example"],
-          dropped: includeKey,
+          expectedInclude: ["default.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
         },
         {
           input: {
@@ -597,9 +597,10 @@ describe("adapter contract fixtures", () => {
             apiKey: "test-key",
             defaults: { [includeKey]: ["default.example"] },
           }),
-          expectedInclude: undefined,
-          expectedExclude: ["query-blocked.example"],
-          dropped: includeKey,
+          expectedInclude: ["default.example"],
+          expectedExclude: undefined,
+          dropped: excludeKey,
+          warningParam: "excludeDomains",
         },
         {
           input: {
@@ -611,7 +612,7 @@ describe("adapter contract fixtures", () => {
           expectedInclude: ["override.example"],
           expectedExclude: undefined,
           dropped: excludeKey,
-          warningParam: id === "you" ? "excludeDomains" : excludeKey,
+          warningParam: "excludeDomains",
         },
         {
           input: {
@@ -689,7 +690,7 @@ describe("adapter contract fixtures", () => {
           }),
           [],
         ),
-      ).toThrow(`${id} ${includeKey}`);
+      ).toThrow(`${id} defaults.${includeKey}`);
     }
   });
 
@@ -773,7 +774,7 @@ describe("adapter contract fixtures", () => {
           }),
           [],
         ),
-      ).toThrow("firecrawl includeDomains");
+      ).toThrow("firecrawl defaults.includeDomains");
     }
 
     const you = adapterFor("you");
@@ -786,7 +787,7 @@ describe("adapter contract fixtures", () => {
         }),
         [],
       ),
-    ).toThrow("you include_domains");
+    ).toThrow("you defaults.include_domains");
   });
 
   it("applies adapter request defaults when config.defaults is absent", () => {
@@ -926,7 +927,13 @@ describe("adapter contract fixtures", () => {
       expect(overriddenLow.query?.[parameter]).toBe(limit - 1);
       expect(effectiveWarnings).toEqual([]);
 
-      for (const invalidValue of [String(limit + 1), 0, -3, 2.5]) {
+      for (const invalidValue of [
+        String(limit + 1),
+        ...(id === "hackernews" ? [] : [0]),
+        -3,
+        2.5,
+        1e21,
+      ]) {
         for (const source of ["default", "override"] as const) {
           const invalidInput =
             source === "override"
@@ -977,14 +984,19 @@ describe("adapter contract fixtures", () => {
       ] as const) {
         const warnings: Warning[] = [];
         const request = adapter.buildRequest(input, config, warnings);
-        expect(request.body?.[parameter]).toBe(limit);
-        expect(warnings).toEqual([
-          {
-            code: "clamped_param",
-            message: `${id} ${expectedParam} was clamped to ${limit}`,
-            param: expectedParam,
-          },
-        ]);
+        if (id === "exa" && input.overrides?.exa !== undefined) {
+          expect(request.body?.[parameter]).toBe(limit + 1);
+          expect(warnings).toEqual([]);
+        } else {
+          expect(request.body?.[parameter]).toBe(limit);
+          expect(warnings).toEqual([
+            {
+              code: "clamped_param",
+              message: `${id} ${expectedParam} was clamped to ${limit}`,
+              param: expectedParam,
+            },
+          ]);
+        }
       }
     }
   });

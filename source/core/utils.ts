@@ -44,54 +44,16 @@ export const addWarning = (
   warnings.push(param ? { code, message, param } : { code, message });
 };
 
-interface CountRule {
-  param: string;
-  max?: number;
-}
-
-// Native count fields are validated even when supplied through raw defaults or
-// overrides. A missing max means the provider has no documented cap here.
-const providerCountRules: Record<string, CountRule> = {
-  brave: { param: "count", max: 20 },
-  exa: { param: "numResults", max: 100 },
-  firecrawl: { param: "limit", max: 100 },
-  gdelt: { param: "maxrecords", max: 250 },
-  hackernews: { param: "hitsPerPage", max: 1000 },
-  jina: { param: "num" },
-  kagi: { param: "limit" },
-  linkup: { param: "maxResults" },
-  parallel: { param: "max_results" },
-  serpapi: { param: "num" },
-  serper: { param: "num" },
-  tavily: { param: "max_results", max: 20 },
-  you: { param: "count" },
-};
-
-const positiveIntegerCount = (
-  value: unknown,
-  source: string,
-): number | undefined => {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-    throw new TypeError(`${source} must be a positive integer`);
-  }
-  return value;
-};
-
-export const validateConfiguredCount = (
-  engine: string,
-  params: Record<string, unknown> | undefined,
-  source: string,
-): void => {
-  const rule = providerCountRules[engine];
-  if (rule && Object.hasOwn(params ?? {}, rule.param)) {
-    positiveIntegerCount(
-      params?.[rule.param],
-      `${engine} ${source}.${rule.param}`,
-    );
-  }
+export const deduplicateWarnings = (warnings: Warning[]): Warning[] => {
+  const seen = new Set<string>();
+  return warnings.filter((warning) => {
+    const key = JSON.stringify([warning.code, warning.param, warning.message]);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 };
 
 export const safeHook = <K extends keyof TelemetryHooks>(
@@ -355,7 +317,7 @@ export const makeMetadata = (input: {
   totalResults: input.totalResults ?? null,
   usage: input.usage ?? null,
   rateLimit: input.rateLimit ?? null,
-  warnings: [...input.warnings],
+  warnings: deduplicateWarnings(input.warnings),
   ...(input.includeRaw ? { raw: input.raw } : {}),
 });
 
@@ -386,12 +348,17 @@ export const makeFailure = (input: {
   metadata: input.metadata,
 });
 
+export const engineOverrides = (
+  overrides: Record<string, Record<string, unknown>> | undefined,
+  engine: string,
+): Record<string, unknown> | undefined =>
+  overrides && Object.hasOwn(overrides, engine) ? overrides[engine] : undefined;
+
 export const mergeParams = (
   engine: string,
   config: EngineConfig,
   mapped: Record<string, unknown>,
   overrides: Record<string, Record<string, unknown>> | undefined,
-  warnings: Warning[] = [],
 ): Record<string, unknown> => {
   const definedMapped = Object.fromEntries(
     Object.entries(mapped).filter(([, value]) => value !== undefined),
@@ -400,35 +367,8 @@ export const mergeParams = (
   const merged: Record<string, unknown> = {
     ...(config.defaults ?? {}),
     ...definedMapped,
-    ...(overrides?.[engine] ?? {}),
+    ...(engineOverrides(overrides, engine) ?? {}),
   };
-
-  const rule = providerCountRules[engine];
-  if (rule && Object.hasOwn(merged, rule.param)) {
-    const fromOverride = Object.hasOwn(overrides?.[engine] ?? {}, rule.param);
-    const fromQuery = !fromOverride && Object.hasOwn(definedMapped, rule.param);
-    const source = fromOverride
-      ? `overrides.${engine}.${rule.param}`
-      : fromQuery
-        ? "count"
-        : `defaults.${rule.param}`;
-    const count = positiveIntegerCount(
-      merged[rule.param],
-      `${engine} ${source}`,
-    );
-    if (count !== undefined && rule.max !== undefined && count > rule.max) {
-      const warningParam = fromQuery ? "count" : rule.param;
-      merged[rule.param] = rule.max;
-      addWarning(
-        warnings,
-        "clamped_param",
-        `${engine} ${warningParam} was clamped to ${rule.max}`,
-        warningParam,
-      );
-    } else {
-      merged[rule.param] = count;
-    }
-  }
 
   return merged;
 };

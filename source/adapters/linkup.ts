@@ -7,7 +7,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   numberOrNull,
   singleQuery,
@@ -23,6 +22,8 @@ import type {
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
 
+import { createParamsSchema, mergeAdapterParams } from "./shared.js";
+
 const endpoint = "https://api.linkup.so/v1/search";
 
 const engineDefaults = { depth: "standard", outputType: "searchResults" };
@@ -33,9 +34,15 @@ const engineDefaults = { depth: "standard", outputType: "searchResults" };
  * `defaults: { outputType: "sourcedAnswer" }` (or `depth: "deep"`) to trade
  * cost for a cited answer — the adapter parses both response shapes.
  */
+const countRule = { param: "maxResults" };
+
 export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "linkup",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({
+    count: countRule,
+    domains: { includeDomains: false, excludeDomains: false },
+  }),
   capabilities: {
     answer: false,
     content: true,
@@ -53,7 +60,7 @@ export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
     },
     verticals: ["web"],
   },
-  buildRequest(input, config) {
+  buildRequest(input, config, warnings) {
     const mapped = {
       q: singleQuery(input.query),
       maxResults: input.count,
@@ -75,7 +82,14 @@ export const linkupAdapter: EngineAdapter<KeyedEngineConfig> = {
       // then per-request overrides on top.
       body: {
         ...engineDefaults,
-        ...mergeParams("linkup", config, mapped, input.overrides),
+        ...mergeAdapterParams(
+          this,
+          config,
+          mapped,
+          input.overrides,
+          warnings,
+          countRule,
+        ),
       },
     };
   },

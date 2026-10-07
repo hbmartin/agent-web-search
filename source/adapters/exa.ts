@@ -9,7 +9,6 @@ import {
   makeMetadata,
   makeResult,
   makeSuccess,
-  mergeParams,
   normalizeDate,
   numberOrNull,
   singleQuery,
@@ -23,11 +22,23 @@ import type {
 } from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
 
+import { createParamsSchema, mergeAdapterParams } from "./shared.js";
+
 const endpoint = "https://api.exa.ai/search";
+
+const countRule = {
+  param: "numResults",
+  max: 100,
+  allowOverrideAboveMax: true,
+};
 
 export const exaAdapter: EngineAdapter<KeyedEngineConfig> = {
   id: "exa",
   configSchema: KeyedEngineConfigSchema,
+  paramsSchema: createParamsSchema({
+    count: countRule,
+    domains: { includeDomains: false, excludeDomains: false },
+  }),
   capabilities: {
     answer: false,
     content: true,
@@ -64,7 +75,14 @@ export const exaAdapter: EngineAdapter<KeyedEngineConfig> = {
       method: "POST",
       url: config.baseUrl ?? endpoint,
       headers: { "x-api-key": config.apiKey },
-      body: mergeParams("exa", config, mapped, input.overrides, warnings),
+      body: mergeAdapterParams(
+        this,
+        config,
+        mapped,
+        input.overrides,
+        warnings,
+        countRule,
+      ),
     };
   },
   parseResponse(response, ctx) {

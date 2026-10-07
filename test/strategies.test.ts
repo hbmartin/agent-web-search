@@ -208,10 +208,11 @@ describe("cost budget and rate-limit gate", () => {
     const third = await client.search({ query: "q" });
 
     expect(first.exa?.ok).toBe(true);
-    expect(second.exa?.ok).toBe(true);
+    expect(second.exa?.ok).toBe(false);
+    expect(!second.exa?.ok && second.exa?.error.kind).toBe("quota");
     expect(third.exa?.ok).toBe(false);
     expect(!third.exa?.ok && third.exa?.error.kind).toBe("quota");
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("respects provider-reported exhausted rate limits", async () => {

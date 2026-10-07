@@ -1,6 +1,7 @@
 import type { SearchResponse } from "../types/index.js";
 import type { AggregatedSearchResponse } from "./aggregate.js";
 import { aggregate } from "./aggregate.js";
+import { deduplicateWarnings } from "./utils.js";
 
 export interface FormatOptions {
   /** Output shape. Default "markdown". */
@@ -13,6 +14,8 @@ export interface FormatOptions {
   includeAnswers?: boolean;
   /** Include which engines returned each result. Default true. */
   includeEngines?: boolean;
+  /** Include provider warnings about changed search parameters. Default true. */
+  includeWarnings?: boolean;
 }
 
 /**
@@ -52,9 +55,20 @@ export const formatForLLM = (
     text: `${error.kind}: ${error.message}`,
   }));
 
+  const warnings: FormattedWarning[] =
+    options.includeWarnings === false
+      ? []
+      : Object.entries(aggregated.warnings ?? {}).flatMap(([engine, items]) =>
+          deduplicateWarnings(items).map((warning) => ({
+            engine,
+            code: warning.code,
+            param: warning.param,
+            text: warning.message,
+          })),
+        );
   return format === "xml"
-    ? formatXml(entries, answers, errors)
-    : formatMarkdown(entries, answers, errors);
+    ? formatXml(entries, answers, errors, warnings)
+    : formatMarkdown(entries, answers, errors, warnings);
 };
 
 interface FormattedEntry {
@@ -71,10 +85,16 @@ interface FormattedError {
   text: string;
 }
 
+interface FormattedWarning extends FormattedError {
+  code: string;
+  param?: string;
+}
+
 const formatMarkdown = (
   entries: FormattedEntry[],
   answers: Record<string, { text: string }>,
   errors: FormattedError[],
+  warnings: FormattedWarning[],
 ): string => {
   const sections: string[] = [];
 
@@ -90,6 +110,12 @@ const formatMarkdown = (
       (error) => `- ${error.engine}: ${error.text}`,
     );
     sections.push(`## Engine errors\n\n${errorLines.join("\n")}`);
+  }
+
+  if (warnings.length > 0) {
+    sections.push(
+      `## Engine warnings\n\n${warnings.map((warning) => `- ${warning.engine}: ${warning.code}${warning.param ? ` (${warning.param})` : ""}: ${warning.text}`).join("\n")}`,
+    );
   }
 
   const resultLines = entries.map((entry) => {
@@ -114,6 +140,7 @@ const formatXml = (
   entries: FormattedEntry[],
   answers: Record<string, { text: string }>,
   errors: FormattedError[],
+  warnings: FormattedWarning[],
 ): string => {
   const lines: string[] = ["<search_results>"];
 
@@ -126,6 +153,12 @@ const formatXml = (
   for (const error of errors) {
     lines.push(
       `  <engine_error engine="${escapeXml(error.engine)}">${escapeXml(error.text)}</engine_error>`,
+    );
+  }
+
+  for (const warning of warnings) {
+    lines.push(
+      `  <engine_warning engine="${escapeXml(warning.engine)}" code="${escapeXml(warning.code)}"${warning.param ? ` param="${escapeXml(warning.param)}"` : ""}>${escapeXml(warning.text)}</engine_warning>`,
     );
   }
 
