@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSearchClient } from "../source/index.js";
 
@@ -12,7 +12,10 @@ const jsonResponse = (body: unknown): Response =>
   });
 
 describe("built-in adapters", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("surfaces an exhausted plain-text GDELT rate limit", async () => {
+    vi.useFakeTimers();
     const fetch = vi.fn(
       async () =>
         new Response("rate limit exceeded", {
@@ -25,7 +28,9 @@ describe("built-in adapters", () => {
       { fetch: fetch as typeof globalThis.fetch },
     );
 
-    const response = await client.search({ query: "news" });
+    const pending = client.search({ query: "news" });
+    await vi.runAllTimersAsync();
+    const response = await pending;
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(response.gdelt?.ok).toBe(false);
     if (response.gdelt && !response.gdelt.ok) {

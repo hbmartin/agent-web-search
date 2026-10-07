@@ -22,7 +22,7 @@ import {
   EnginesConfigSchema,
   QueryInputSchema,
 } from "../types/index.js";
-import { type AttemptLease, DispatchDenied, DispatchGate } from "./gate.js";
+import { type AttemptLease, DispatchGate, isDispatchDenied } from "./gate.js";
 import {
   adapterError,
   executeWithRetries,
@@ -277,15 +277,13 @@ const searchRace = async (
   let won = false;
 
   const launch = (entry: SelectedEngine) =>
-    run(entry, combined)
-      .catch((cause) => engineException(entry.adapter.id, "parse", cause))
-      .then((result) => {
-        results[entry.adapter.id] = result;
-        if (result.ok && !won) {
-          won = true;
-          controller.abort(new Error("Another engine already succeeded"));
-        }
-      });
+    run(entry, combined).then((result) => {
+      results[entry.adapter.id] = result;
+      if (result.ok && !won) {
+        won = true;
+        controller.abort(new Error("Another engine already succeeded"));
+      }
+    });
 
   for (const [index, entry] of engines.entries()) {
     if (index > 0 && staggerMs > 0) {
@@ -320,15 +318,31 @@ const sleepUntilAbort = (ms: number, signal: AbortSignal): Promise<void> =>
     signal.addEventListener("abort", onAbort, { once: true });
   });
 
-const runEngine = async (input: {
+interface EngineRunInput {
   adapter: EngineAdapter;
   config: EngineConfig;
   query: QueryInput;
   clientOptions: SearchClientOptions;
   requestOptions?: SearchRequestOptions;
   gate?: DispatchGate;
-}): Promise<EngineResult> => {
-  const hooks = mergedHooks(input);
+}
+
+const runEngine = async (input: EngineRunInput): Promise<EngineResult> => {
+  let hooks: ReturnType<typeof mergeHooks>;
+  let result: EngineResult;
+  try {
+    hooks = mergedHooks(input);
+    result = await executeEngine(input, hooks);
+  } catch (cause) {
+    result = engineException(input.adapter.id, "parse", cause);
+  }
+  return settleResult(result, hooks);
+};
+
+const executeEngine = async (
+  input: EngineRunInput,
+  hooks: ReturnType<typeof mergeHooks>,
+): Promise<EngineResult> => {
   let warnings: Warning[] = [];
   let phase: "bad_request" | "parse" = "bad_request";
   let result: EngineResult;
@@ -374,10 +388,6 @@ const runEngine = async (input: {
   } catch (cause) {
     result = engineException(input.adapter.id, phase, cause, warnings);
   }
-  if (!result.ok) {
-    return settleFailure(result, hooks);
-  }
-  safeHook(hooks, "onSettled", { engine: input.adapter.id, result });
   return result;
 };
 
@@ -402,11 +412,13 @@ const engineException = (
     }),
   }) as EngineResult & { ok: false };
 
-const settleFailure = (
-  result: EngineResult & { ok: false },
+const settleResult = (
+  result: EngineResult,
   hooks: ReturnType<typeof mergeHooks>,
 ): EngineResult => {
-  safeHook(hooks, "onError", { engine: result.engine, error: result.error });
+  if (!result.ok) {
+    safeHook(hooks, "onError", { engine: result.engine, error: result.error });
+  }
   safeHook(hooks, "onSettled", { engine: result.engine, result });
   return result;
 };
@@ -455,7 +467,7 @@ const streamEngines = (input: {
 
         if (warnings.length > 0 && config.onUnsupportedParam === "error") {
           const result = unsupportedFailure(adapter.id, warnings);
-          emitTerminalEvents(queue, adapter.id, settleFailure(result, hooks));
+          emitTerminalEvents(queue, adapter.id, settleResult(result, hooks));
           return;
         }
 
@@ -494,7 +506,7 @@ const streamEngines = (input: {
           cause,
           warnings,
         );
-        emitTerminalEvents(queue, adapter.id, settleFailure(result, hooks));
+        emitTerminalEvents(queue, adapter.id, settleResult(result, hooks));
       } finally {
         pending -= 1;
         if (pending === 0) {
@@ -560,10 +572,7 @@ async function* runNativeStream(input: {
       lease.release();
     }
     if (result) {
-      if (!result.ok) {
-        safeHook(hooks, "onError", { engine: adapter.id, error: result.error });
-      }
-      safeHook(hooks, "onSettled", { engine: adapter.id, result });
+      settleResult(result, hooks);
     }
   };
   const guardedFetch: FetchLike = async (url, init) => {
@@ -583,14 +592,26 @@ async function* runNativeStream(input: {
         throw caller.reason;
       }
       const controller = new AbortController();
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort("timeout");
-      }, config.timeoutMs ?? defaultTimeoutMs);
+      const timeoutMs = config.timeoutMs ?? defaultTimeoutMs;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const stopTimer = () => {
+        if (timeout !== undefined) {
+          clearTimeout(timeout);
+          timeout = undefined;
+        }
+      };
+      const armTimer = () => {
+        stopTimer();
+        timeout = setTimeout(() => {
+          timedOut = true;
+          controller.abort("timeout");
+        }, timeoutMs);
+      };
+      armTimer();
       const abort = () => controller.abort(caller.reason);
       caller.addEventListener("abort", abort, { once: true });
       cleanup = () => {
-        clearTimeout(timeout);
+        stopTimer();
         caller.removeEventListener("abort", abort);
       };
       cleanups.push(cleanup);
@@ -623,6 +644,7 @@ async function* runNativeStream(input: {
         signal: controller.signal,
       });
       lastResponse = response;
+      stopTimer();
       gate?.observe(adapter.id, parseRateLimit(response.headers));
       if (!response.body) {
         cleanup();
@@ -665,40 +687,51 @@ async function* runNativeStream(input: {
         release();
       };
       readers.set(reader, release);
-      const body = new ReadableStream<Uint8Array>({
-        start(out) {
-          bodyController = out;
-          controller.signal.addEventListener("abort", abortBody, {
-            once: true,
-          });
-          if (controller.signal.aborted) {
-            abortBody();
-          }
-        },
-        async pull(out) {
-          try {
-            const item = await reader.read();
-            if (finished) {
-              return;
+      const body = new ReadableStream<Uint8Array>(
+        {
+          start(out) {
+            bodyController = out;
+            controller.signal.addEventListener("abort", abortBody, {
+              once: true,
+            });
+            if (controller.signal.aborted) {
+              abortBody();
             }
-            if (item.done) {
-              out.close();
+          },
+          async pull(out) {
+            armTimer();
+            try {
+              while (true) {
+                const item = await reader.read();
+                if (finished) {
+                  return;
+                }
+                if (item.done) {
+                  out.close();
+                  release();
+                  return;
+                }
+                if (item.value.byteLength === 0) {
+                  continue;
+                }
+                stopTimer();
+                out.enqueue(item.value);
+                return;
+              }
+            } catch (cause) {
+              if (!finished) {
+                out.error(bodyError(cause));
+              }
               release();
-            } else {
-              out.enqueue(item.value);
             }
-          } catch (cause) {
-            if (!finished) {
-              out.error(bodyError(cause));
-            }
+          },
+          cancel(reason) {
             release();
-          }
+            return reader.cancel(reason);
+          },
         },
-        cancel(reason) {
-          release();
-          return reader.cancel(reason);
-        },
-      });
+        { highWaterMark: 0 },
+      );
       const wrapped = new Response(body, {
         status: response.status,
         statusText: response.statusText,
@@ -716,19 +749,18 @@ async function* runNativeStream(input: {
     } catch (cause) {
       cleanup();
       lease?.release();
-      requestError =
-        cause instanceof DispatchDenied
-          ? cause.error
-          : networkError(
-              timedOut ? "timeout" : "network",
-              signal.aborted
-                ? "Request aborted"
-                : timedOut
-                  ? "Request timed out"
-                  : "Request failed",
-              cause,
-              false,
-            );
+      requestError = isDispatchDenied(cause)
+        ? cause.error
+        : networkError(
+            timedOut ? "timeout" : "network",
+            signal.aborted
+              ? "Request aborted"
+              : timedOut
+                ? "Request timed out"
+                : "Request failed",
+            cause,
+            false,
+          );
       throw cause;
     }
   };

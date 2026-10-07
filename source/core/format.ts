@@ -58,14 +58,27 @@ export const formatForLLM = (
   const warnings: FormattedWarning[] =
     options.includeWarnings === false
       ? []
-      : Object.entries(aggregated.warnings ?? {}).flatMap(([engine, items]) =>
-          deduplicateWarnings(items).map((warning) => ({
-            engine,
-            code: warning.code,
-            param: warning.param,
-            text: warning.message,
-          })),
-        );
+      : Object.entries(aggregated.warnings ?? {}).flatMap(([engine, items]) => {
+          const unique = deduplicateWarnings(items);
+          const error = aggregated.failed[engine];
+          const redundant =
+            error?.kind === "unsupported" &&
+            error.message ===
+              unique
+                .filter((warning) => warning.code === "unsupported_param")
+                .map((warning) => warning.message)
+                .join("; ");
+          return unique
+            .filter(
+              (warning) => !(redundant && warning.code === "unsupported_param"),
+            )
+            .map((warning) => ({
+              engine,
+              code: warning.code,
+              param: warning.param,
+              text: warning.message,
+            }));
+        });
   return format === "xml"
     ? formatXml(entries, answers, errors, warnings)
     : formatMarkdown(entries, answers, errors, warnings);
