@@ -12,7 +12,12 @@ import {
   normalizeDate,
   queryArray,
 } from "../core/utils.js";
-import type { EngineAdapter, KeyedEngineConfig } from "../types/index.js";
+import type {
+  EngineAdapter,
+  KeyedEngineConfig,
+  Usage,
+  Warning,
+} from "../types/index.js";
 import { KeyedEngineConfigSchema } from "../types/index.js";
 
 import {
@@ -124,7 +129,7 @@ export const parallelAdapter: EngineAdapter<KeyedEngineConfig> = {
         totalResults: results.length,
         usage: usage(raw),
         rateLimit: ctx.rateLimit,
-        warnings: ctx.warnings,
+        warnings: [...ctx.warnings, ...providerWarnings(raw)],
         raw,
         includeRaw: ctx.includeRaw,
       }),
@@ -147,17 +152,44 @@ const compact = (value: Record<string, unknown>): Record<string, unknown> =>
     }),
   );
 
-const usage = (raw: unknown) => {
-  if (!isObject(raw) || !isObject(raw.usage)) {
+const usage = (raw: unknown): Usage | null => {
+  if (!isObject(raw)) {
     return null;
   }
 
+  if (Array.isArray(raw.usage)) {
+    return {
+      units: raw.usage
+        .filter(isObject)
+        .flatMap((item) =>
+          isString(item.name) &&
+          typeof item.count === "number" &&
+          Number.isFinite(item.count)
+            ? [{ name: item.name, count: item.count }]
+            : [],
+        ),
+    };
+  }
+
+  // Retain compatibility with older responses and custom endpoints.
+  if (!isObject(raw.usage)) {
+    return null;
+  }
   return {
     units: Object.entries(raw.usage)
       .filter(([, count]) => typeof count === "number")
       .map(([name, count]) => ({ name, count: count as number })),
   };
 };
+
+const providerWarnings = (raw: unknown): Warning[] =>
+  (isObject(raw) ? asArray(raw.warnings) : [])
+    .filter(isObject)
+    .flatMap((item) =>
+      isString(item.type) && isString(item.message)
+        ? [{ code: item.type, message: item.message }]
+        : [],
+    );
 
 /** Only these provider containers merge by leaf; raw unsets clear a container. */
 const mergeSettings = (
